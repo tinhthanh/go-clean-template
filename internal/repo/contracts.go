@@ -13,11 +13,11 @@ type (
 	// TranslationRepo -.
 	TranslationRepo interface {
 		Store(context.Context, entity.Translation) error
-		GetHistory(context.Context) ([]entity.Translation, error)
+		GetHistory(ctx context.Context, limit, offset int) ([]entity.Translation, error)
 	}
 
 	// TranslationWebAPI -.
 	TranslationWebAPI interface {
-		Translate(entity.Translation) (entity.Translation, error)
+		Translate(ctx context.Context, translation entity.Translation) (entity.Translation, error)
 	}
 )

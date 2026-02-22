@@ -42,18 +42,18 @@ func (m *MockTranslationRepo) EXPECT() *MockTranslationRepoMockRecorder {
 }
 
 // GetHistory mocks base method.
-func (m *MockTranslationRepo) GetHistory(arg0 context.Context) ([]entity.Translation, error) {
+func (m *MockTranslationRepo) GetHistory(ctx context.Context, limit, offset int) ([]entity.Translation, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetHistory", arg0)
+	ret := m.ctrl.Call(m, "GetHistory", ctx, limit, offset)
 	ret0, _ := ret[0].([]entity.Translation)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetHistory indicates an expected call of GetHistory.
-func (mr *MockTranslationRepoMockRecorder) GetHistory(arg0 any) *gomock.Call {
+func (mr *MockTranslationRepoMockRecorder) GetHistory(ctx, limit, offset any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHistory", reflect.TypeOf((*MockTranslationRepo)(nil).GetHistory), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHistory", reflect.TypeOf((*MockTranslationRepo)(nil).GetHistory), ctx, limit, offset)
 }
 
 // Store mocks base method.
@@ -95,16 +95,16 @@ func (m *MockTranslationWebAPI) EXPECT() *MockTranslationWebAPIMockRecorder {
 }
 
 // Translate mocks base method.
-func (m *MockTranslationWebAPI) Translate(arg0 entity.Translation) (entity.Translation, error) {
+func (m *MockTranslationWebAPI) Translate(ctx context.Context, translation entity.Translation) (entity.Translation, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Translate", arg0)
+	ret := m.ctrl.Call(m, "Translate", ctx, translation)
 	ret0, _ := ret[0].(entity.Translation)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Translate indicates an expected call of Translate.
-func (mr *MockTranslationWebAPIMockRecorder) Translate(arg0 any) *gomock.Call {
+func (mr *MockTranslationWebAPIMockRecorder) Translate(ctx, translation any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Translate", reflect.TypeOf((*MockTranslationWebAPI)(nil).Translate), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Translate", reflect.TypeOf((*MockTranslationWebAPI)(nil).Translate), ctx, translation)
 }

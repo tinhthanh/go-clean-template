@@ -21,16 +21,26 @@ func New(pg *postgres.Postgres) *TranslationRepo {
 }
 
 // GetHistory -.
-func (r *TranslationRepo) GetHistory(ctx context.Context) ([]entity.Translation, error) {
-	sql, _, err := r.Builder.
+func (r *TranslationRepo) GetHistory(ctx context.Context, limit, offset int) ([]entity.Translation, error) {
+	builder := r.Builder.
 		Select("source, destination, original, translation").
 		From("history").
-		ToSql()
+		OrderBy("created_at DESC")
+
+	if limit > 0 {
+		builder = builder.Limit(uint64(limit)) //nolint:gosec // skip integer overflow conversion int -> uint64
+	}
+
+	if offset > 0 {
+		builder = builder.Offset(uint64(offset)) //nolint:gosec // skip integer overflow conversion int -> uint64
+	}
+
+	sql, args, err := builder.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("TranslationRepo - GetHistory - r.Builder: %w", err)
 	}
 
-	rows, err := r.Pool.Query(ctx, sql)
+	rows, err := r.Pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("TranslationRepo - GetHistory - r.Pool.Query: %w", err)
 	}
