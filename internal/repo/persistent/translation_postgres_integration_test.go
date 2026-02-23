@@ -5,6 +5,7 @@ package persistent_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ const (
 
 type TranslationRepoSuite struct {
 	suite.Suite
-	container *tcpg.PostgresContainer
+	container *tcpg.PostgresContainer // nil when using external DB
 	pg        *postgres.Postgres
 	repo      *persistent.TranslationRepo
 	ctx       context.Context
@@ -36,31 +37,39 @@ type TranslationRepoSuite struct {
 func (s *TranslationRepoSuite) SetupSuite() {
 	s.ctx = context.Background()
 
-	// Start PostgreSQL container.
-	container, err := tcpg.Run(s.ctx,
-		postgresImage,
-		tcpg.WithDatabase(testDB),
-		tcpg.WithUsername(testUser),
-		tcpg.WithPassword(testPassword),
-		tcpg.WithInitScripts(),
-		tc.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(30*time.Second),
-		),
-	)
-	require.NoError(s.T(), err)
+	var connStr string
 
-	s.container = container
+	// If TEST_PG_URL is set (Docker compose), use it directly.
+	// Otherwise, spin up a testcontainer for local development.
+	if pgURL := os.Getenv("TEST_PG_URL"); pgURL != "" {
+		connStr = pgURL
+	} else {
+		container, err := tcpg.Run(s.ctx,
+			postgresImage,
+			tcpg.WithDatabase(testDB),
+			tcpg.WithUsername(testUser),
+			tcpg.WithPassword(testPassword),
+			tcpg.WithInitScripts(),
+			tc.WithWaitStrategy(
+				wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).
+					WithStartupTimeout(30*time.Second),
+			),
+		)
+		require.NoError(s.T(), err)
 
-	// Get connection string.
-	connStr, err := container.ConnectionString(s.ctx, "sslmode=disable")
-	require.NoError(s.T(), err)
+		s.container = container
+
+		cs, err := container.ConnectionString(s.ctx, "sslmode=disable")
+		require.NoError(s.T(), err)
+
+		connStr = cs
+	}
 
 	// Connect to PostgreSQL.
 	pg, err := postgres.New(connStr,
 		postgres.MaxPoolSize(2),
-		postgres.ConnAttempts(5),
+		postgres.ConnAttempts(10),
 		postgres.ConnTimeout(time.Second),
 	)
 	require.NoError(s.T(), err)
@@ -76,9 +85,21 @@ func (s *TranslationRepoSuite) SetupSuite() {
 			original VARCHAR(255),
 			translation VARCHAR(255)
 		);
-		ALTER TABLE history ADD COLUMN created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-		ALTER TABLE history ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-		CREATE INDEX idx_history_created_at ON history(created_at DESC);
+	`)
+	require.NoError(s.T(), err)
+
+	// Apply improvement migration (safe with IF NOT EXISTS pattern).
+	_, err = pg.Pool.Exec(s.ctx, `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='history' AND column_name='created_at') THEN
+				ALTER TABLE history ADD COLUMN created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='history' AND column_name='updated_at') THEN
+				ALTER TABLE history ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+			END IF;
+		END $$;
+		CREATE INDEX IF NOT EXISTS idx_history_created_at ON history(created_at DESC);
 	`)
 	require.NoError(s.T(), err)
 
@@ -153,7 +174,7 @@ func (s *TranslationRepoSuite) TestGetHistoryPagination() {
 	require.Len(s.T(), page1, 2)
 
 	// Should be ordered by created_at DESC — most recent first.
-	require.Equal(s.T(), "text 4", page1[0].Original) // most recent
+	require.Equal(s.T(), "text 4", page1[0].Original)
 	require.Equal(s.T(), "text 3", page1[1].Original)
 
 	// Get next 2 items (limit=2, offset=2).
@@ -166,7 +187,7 @@ func (s *TranslationRepoSuite) TestGetHistoryPagination() {
 	// Get last page (limit=2, offset=4).
 	page3, err := s.repo.GetHistory(s.ctx, 2, 4)
 	require.NoError(s.T(), err)
-	require.Len(s.T(), page3, 1) // Only 1 item left.
+	require.Len(s.T(), page3, 1)
 	require.Equal(s.T(), "text 0", page3[0].Original)
 }
 
@@ -206,7 +227,7 @@ func (s *TranslationRepoSuite) TestGetHistoryNoLimitNoOffset() {
 		require.NoError(s.T(), err)
 	}
 
-	// Limit=0, offset=0 should return all records (no limit applied).
+	// Limit=0, offset=0 should return all records.
 	history, err := s.repo.GetHistory(s.ctx, 0, 0)
 	require.NoError(s.T(), err)
 	require.Len(s.T(), history, 3)

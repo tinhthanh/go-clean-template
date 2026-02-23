@@ -4,6 +4,7 @@ package redis_test
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ const redisImage = "redis:7.4-alpine"
 
 type RedisSuite struct {
 	suite.Suite
-	container *tcredis.RedisContainer
+	container *tcredis.RedisContainer // nil when using external Redis
 	client    *pkgredis.Redis
 	ctx       context.Context
 }
@@ -26,19 +27,27 @@ type RedisSuite struct {
 func (s *RedisSuite) SetupSuite() {
 	s.ctx = context.Background()
 
-	// Start Redis container.
-	container, err := tcredis.Run(s.ctx, redisImage)
-	require.NoError(s.T(), err)
+	var connStr string
 
-	s.container = container
+	// If TEST_REDIS_URL is set (Docker compose), use it directly.
+	// Otherwise, spin up a testcontainer for local development.
+	if redisURL := os.Getenv("TEST_REDIS_URL"); redisURL != "" {
+		connStr = redisURL
+	} else {
+		container, err := tcredis.Run(s.ctx, redisImage)
+		require.NoError(s.T(), err)
 
-	// Get connection string.
-	connStr, err := container.ConnectionString(s.ctx)
-	require.NoError(s.T(), err)
+		s.container = container
+
+		cs, err := container.ConnectionString(s.ctx)
+		require.NoError(s.T(), err)
+
+		connStr = cs
+	}
 
 	// Connect to Redis.
 	client, err := pkgredis.New(connStr,
-		pkgredis.ConnAttempts(3),
+		pkgredis.ConnAttempts(10),
 		pkgredis.ConnTimeout(time.Second),
 	)
 	require.NoError(s.T(), err)

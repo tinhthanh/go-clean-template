@@ -107,5 +107,15 @@ bin-deps: ### install tools
 	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate
 .PHONY: bin-deps
 
+test-docker: ### run all tests (unit + integration) inside Docker
+	docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from test-runner
+	docker compose -f docker-compose.test.yml down -v
+.PHONY: test-docker
+
+test-docker-down: ### cleanup test containers
+	docker compose -f docker-compose.test.yml down -v --remove-orphans
+.PHONY: test-docker-down
+
 pre-commit: swag-v1 proto-v1 mock format linter-golangci test ### run pre-commit
 .PHONY: pre-commit
+
