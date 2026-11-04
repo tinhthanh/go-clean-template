@@ -6,16 +6,16 @@ import (
 	"time"
 
 	"github.com/evrone/go-clean-template/pkg/logger"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/requestid"
 )
 
-func buildRequestMessage(ctx *fiber.Ctx, latency time.Duration) string {
+func buildRequestMessage(ctx fiber.Ctx, latency time.Duration) string {
 	var result strings.Builder
 
-	// Request ID.
-	if requestID, ok := ctx.Locals("request_id").(string); ok {
+	if id := requestid.FromContext(ctx); id != "" {
 		result.WriteString("[")
-		result.WriteString(requestID)
+		result.WriteString(id)
 		result.WriteString("] ")
 	}
 
@@ -34,15 +34,12 @@ func buildRequestMessage(ctx *fiber.Ctx, latency time.Duration) string {
 	return result.String()
 }
 
-// Logger returns a middleware that logs request information including request ID and latency.
-func Logger(l logger.Interface) func(c *fiber.Ctx) error {
-	return func(ctx *fiber.Ctx) error {
+func Logger(l logger.Interface) func(c fiber.Ctx) error {
+	return func(ctx fiber.Ctx) error {
 		start := time.Now()
-
 		err := ctx.Next()
 
-		latency := time.Since(start)
-		l.Info(buildRequestMessage(ctx, latency))
+		l.Info("%s", buildRequestMessage(ctx, time.Since(start)))
 
 		return err
 	}

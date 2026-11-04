@@ -10,98 +10,98 @@ import (
 type (
 	// Config -.
 	Config struct {
-		App       App
-		HTTP      HTTP
-		Log       Log
-		PG        PG
-		GRPC      GRPC
-		RMQ       RMQ
-		NATS      NATS
-		Redis     Redis
-		Metrics   Metrics
-		Swagger   Swagger
-		CORS      CORS
-		RateLimit RateLimit
-		Tracer    Tracer
+		App     app
+		HTTP    http
+		Log     log
+		PG      pg
+		GRPC    grpc
+		RMQ     rmq
+		NATS    nats
+		JWT     jwt
+		Metrics metrics
+		Swagger swagger
+		Tracing tracing
+		CORS    cors
+		Limit   limit
 	}
 
 	// App -.
-	App struct {
+	app struct {
 		Name    string `env:"APP_NAME,required"`
 		Version string `env:"APP_VERSION,required"`
-		Env     string `env:"APP_ENV" envDefault:"development"`
 	}
 
 	// HTTP -.
-	HTTP struct {
+	http struct {
 		Port           string `env:"HTTP_PORT,required"`
 		UsePreforkMode bool   `env:"HTTP_USE_PREFORK_MODE" envDefault:"false"`
 	}
 
 	// Log -.
-	Log struct {
+	log struct {
 		Level string `env:"LOG_LEVEL,required"`
 	}
 
 	// PG -.
-	PG struct {
+	pg struct {
 		PoolMax int    `env:"PG_POOL_MAX,required"`
 		URL     string `env:"PG_URL,required"`
 	}
 
 	// GRPC -.
-	GRPC struct {
+	grpc struct {
 		Enabled bool   `env:"GRPC_ENABLED" envDefault:"true"`
-		Port    string `env:"GRPC_PORT" envDefault:"8081"`
+		Port    string `env:"GRPC_PORT,required"`
 	}
 
 	// RMQ -.
-	RMQ struct {
+	rmq struct {
 		Enabled        bool   `env:"RMQ_ENABLED" envDefault:"true"`
-		ServerExchange string `env:"RMQ_RPC_SERVER" envDefault:"rpc_server"`
-		ClientExchange string `env:"RMQ_RPC_CLIENT" envDefault:"rpc_client"`
-		URL            string `env:"RMQ_URL" envDefault:"amqp://guest:guest@localhost:5672/"`
+		ServerExchange string `env:"RMQ_RPC_SERVER,required"`
+		ClientExchange string `env:"RMQ_RPC_CLIENT,required"`
+		URL            string `env:"RMQ_URL,required"`
 	}
 
 	// NATS -.
-	NATS struct {
+	nats struct {
 		Enabled        bool   `env:"NATS_ENABLED" envDefault:"true"`
-		ServerExchange string `env:"NATS_RPC_SERVER" envDefault:"rpc_server"`
-		URL            string `env:"NATS_URL" envDefault:"nats://guest:guest@localhost:4222/"`
+		ServerExchange string `env:"NATS_RPC_SERVER,required"`
+		URL            string `env:"NATS_URL,required"`
+	}
+
+	// JWT -.
+	jwt struct {
+		Secret      string        `env:"JWT_SECRET,required"`
+		TokenExpiry time.Duration `env:"JWT_TOKEN_EXPIRY" envDefault:"24h"`
 	}
 
 	// Metrics -.
-	Metrics struct {
+	metrics struct {
 		Enabled bool `env:"METRICS_ENABLED" envDefault:"true"`
 	}
 
 	// Swagger -.
-	Swagger struct {
+	swagger struct {
 		Enabled bool `env:"SWAGGER_ENABLED" envDefault:"false"`
 	}
 
-	// CORS -.
-	CORS struct {
-		AllowOrigins string `env:"CORS_ALLOWED_ORIGINS" envDefault:"*"`
+	// Tracing -.
+	tracing struct {
+		Enabled      bool    `env:"TRACING_ENABLED" envDefault:"false"`
+		OTLPEndpoint string  `env:"TRACING_OTLP_ENDPOINT" envDefault:"localhost:4317"`
+		OTLPInsecure bool    `env:"TRACING_OTLP_INSECURE" envDefault:"true"`
+		SampleRate   float64 `env:"TRACING_SAMPLE_RATE" envDefault:"0.1"`
 	}
 
-	// RateLimit -.
-	RateLimit struct {
-		Max        int           `env:"RATE_LIMIT_MAX" envDefault:"100"`
+	// CORS -. The origins a browser may call the API from, comma-separated.
+	cors struct {
+		AllowOrigins []string `env:"CORS_ALLOWED_ORIGINS" envDefault:"*" envSeparator:","`
+	}
+
+	// Limit -. Requests per client in each window, kept in memory.
+	limit struct {
+		Max        int           `env:"RATE_LIMIT_MAX"        envDefault:"100"`
 		Expiration time.Duration `env:"RATE_LIMIT_EXPIRATION" envDefault:"1m"`
-	}
-
-	// Redis -.
-	Redis struct {
-		Enabled bool   `env:"REDIS_ENABLED" envDefault:"false"`
-		URL     string `env:"REDIS_URL" envDefault:"redis://localhost:6379/0"`
-	}
-
-	// Tracer -.
-	Tracer struct {
-		Enabled     bool   `env:"TRACER_ENABLED" envDefault:"false"`
-		URL         string `env:"TRACER_URL" envDefault:"http://localhost:4318/v1/traces"`
-		ServiceName string `env:"TRACER_SERVICE_NAME" envDefault:"go-clean-template"`
 	}
 )
 
@@ -112,27 +112,5 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("config error: %w", err)
 	}
 
-	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("config validation error: %w", err)
-	}
-
 	return cfg, nil
-}
-
-// validate performs basic validation on the parsed config.
-func (c *Config) validate() error {
-	if c.PG.PoolMax <= 0 {
-		return fmt.Errorf("PG_POOL_MAX must be positive, got %d", c.PG.PoolMax)
-	}
-
-	if c.HTTP.Port == "" {
-		return fmt.Errorf("HTTP_PORT is required")
-	}
-
-	return nil
-}
-
-// IsProduction returns true if the app is running in production mode.
-func (c *Config) IsProduction() bool {
-	return c.App.Env == "production"
 }

@@ -6,7 +6,6 @@
 
 [![Release](https://img.shields.io/github/v/release/evrone/go-clean-template.svg)](https://github.com/evrone/go-clean-template/releases/)
 [![License](https://img.shields.io/badge/License-MIT-success)](https://github.com/evrone/go-clean-template/blob/master/LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/evrone/go-clean-template)](https://goreportcard.com/report/github.com/evrone/go-clean-template)
 [![codecov](https://codecov.io/gh/evrone/go-clean-template/branch/master/graph/badge.svg?token=XE3E0X3EVQ)](https://codecov.io/gh/evrone/go-clean-template)
 
 [![Web Framework](https://img.shields.io/badge/Fiber-Web%20Framework-blue)](https://github.com/gofiber/fiber)
@@ -17,6 +16,7 @@
 [![Database Migrations](https://img.shields.io/badge/Migrations-Seamless%20Schema%20Updates-blue)](https://github.com/golang-migrate/migrate)
 [![Logging](https://img.shields.io/badge/ZeroLog-Structured%20Logging-blue)](https://github.com/rs/zerolog)
 [![Metrics](https://img.shields.io/badge/Prometheus-Metrics%20Integration-blue)](https://github.com/ansrivas/fiberprometheus)
+[![Tracing](https://img.shields.io/badge/OpenTelemetry-Distributed%20Tracing-blue)](https://opentelemetry.io/)
 [![Testing](https://img.shields.io/badge/Testify-Testing%20Framework-blue)](https://github.com/stretchr/testify)
 [![Mocking](https://img.shields.io/badge/Mock-Mocking%20Library-blue)](https://go.uber.org/mock)
 
@@ -31,7 +31,7 @@
 [Go-clean-template](https://evrone.com/go-clean-template?utm_source=github&utm_campaign=go-clean-template) создан и
 поддерживается [Evrone](https://evrone.com/?utm_source=github&utm_campaign=go-clean-template).
 
-Этот шаблон поддерживает три типа серверов:
+Этот шаблон поддерживает четыре типа серверов:
 
 - AMQP RPC (на основе RabbitMQ в качестве [транспорта](https://github.com/rabbitmq/amqp091-go)
   и [Request-Reply паттерна]((https://www.enterpriseintegrationpatterns.com/patterns/messaging/RequestReply.html)))
@@ -40,12 +40,66 @@
 - gRPC ([gRPC](https://grpc.io/) фреймворк на основе protobuf)
 - REST API ([Fiber](https://github.com/gofiber/fiber) фреймворк)
 
+Шаблон включает три домена для демонстрации многосервисной архитектуры:
+
+- **Аутентификация пользователей** — регистрация, вход, авторизация на основе JWT
+- **Управление задачами** — CRUD-операции с переходами статусов (todo, in_progress, done)
+- **Перевод** — перевод текста с сохранением истории
+
+Все домены доступны через все четыре транспорта (REST, gRPC, AMQP RPC, NATS RPC).
+
 ## Содержание
 
+- [Домены](#домены)
 - [Быстрый старт](#быстрый-старт)
+- [Наблюдаемость](#наблюдаемость)
 - [Структура проекта](#структура-проекта)
 - [Внедрение зависимостей](#внедрение-зависимостей)
 - [Чистая Архитектура](#чистая-архитектура)
+
+## Домены
+
+Шаблон включает три полностью реализованных домена, каждый из которых доступен через все четыре транспорта (REST, gRPC, AMQP RPC, NATS RPC).
+
+### Аутентификация пользователей
+
+Регистрация, вход и авторизация на основе JWT.
+
+| Операция    | REST                     | gRPC                     |
+|-------------|--------------------------|--------------------------|
+| Регистрация | `POST /v1/auth/register` | `AuthService/Register`   |
+| Вход        | `POST /v1/auth/login`    | `AuthService/Login`      |
+| Профиль     | `GET /v1/user/profile`   | `AuthService/GetProfile` |
+
+- Пароли хешируются с помощью bcrypt
+- JWT-токены с настраиваемым временем жизни
+- Middleware авторизации на всех транспортах
+
+### Управление задачами
+
+CRUD-операции со стейт-машиной статусов.
+
+| Операция      | REST                         | gRPC                         |
+|---------------|------------------------------|------------------------------|
+| Создание      | `POST /v1/tasks`             | `TaskService/CreateTask`     |
+| Список        | `GET /v1/tasks`              | `TaskService/ListTasks`      |
+| Получение     | `GET /v1/tasks/:id`          | `TaskService/GetTask`        |
+| Обновление    | `PUT /v1/tasks/:id`          | `TaskService/UpdateTask`     |
+| Смена статуса | `PATCH /v1/tasks/:id/status` | `TaskService/TransitionTask` |
+| Удаление      | `DELETE /v1/tasks/:id`       | `TaskService/DeleteTask`     |
+
+- Переходы статусов: `todo` → `in_progress` → `done` (и `in_progress` → `todo`)
+- Пагинация с `limit`/`offset` и опциональная фильтрация по статусу
+- Задачи привязаны к аутентифицированному пользователю
+
+### Перевод
+
+Перевод текста через внешний API с сохранением истории.
+
+| Операция | REST                                | gRPC                                    |
+|----------|-------------------------------------|-----------------------------------------|
+| Перевод  | `POST /v1/translation/do-translate` | `TranslationHistoryService/DoTranslate` |
+| История  | `GET /v1/translation/history`       | `TranslationHistoryService/ShowHistory` |
 
 ## Быстрый старт
 
@@ -86,6 +140,8 @@ make compose-up-all
   - http://app.lvh.me/swagger | http://127.0.0.1:8080/swagger
 - gRPC:
   - URL: `tcp://grpc.lvh.me:8081` | `tcp://127.0.0.1:8081`
+  - [v1/auth.proto](docs/proto/v1/auth.proto)
+  - [v1/task.proto](docs/proto/v1/task.proto)
   - [v1/translation.history.proto](docs/proto/v1/translation.history.proto)
 - PostgreSQL:
   - `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
@@ -95,6 +151,36 @@ make compose-up-all
 - NATS monitoring:
   - http://nats.lvh.me | http://127.0.0.1:8222/
   - Credentials: `guest` / `guest`
+- Jaeger (UI трейсов):
+  - http://jaeger.lvh.me | http://127.0.0.1:16686
+
+## Наблюдаемость
+
+Распределённая трассировка реализована через [OpenTelemetry](https://opentelemetry.io/). Спаны экспортируются по
+OTLP/gRPC в коллектор — [Jaeger](https://www.jaegertracing.io/) в docker-стеке.
+
+- **Проброс контекста** — W3C `traceparent` + `baggage`, поэтому один трейс охватывает все четыре транспорта. REST
+  использует middleware [otelfiber](https://github.com/gofiber/contrib/tree/main/otelfiber), gRPC — stats handler
+  [otelgrpc](https://github.com/open-telemetry/opentelemetry-go-contrib), а AMQP RPC / NATS RPC переносят trace-контекст
+  в заголовках сообщений через собственные carrier'ы (`pkg/rabbitmq/rmq_rpc/otel_carrier.go`,
+  `pkg/nats/nats_rpc/otel_carrier.go`).
+- **Инструментированные слои** — use case'ы и репозитории обёрнуты в трассировочные декораторы (`*/tracing.go`), поэтому
+  трейс показывает весь путь: controller → usecase → repo / webapi.
+- **No-op при отключении** — при `TRACING_ENABLED=false` устанавливается no-op tracer provider, поэтому инструментация
+  выполняется безусловно и без накладных расходов.
+- **Сэмплирование** — `TRACING_SAMPLE_RATE` — parent-based коэффициент. Локально используйте `1.0`; в продакшене
+  снижайте (`0.1` / `0.01`).
+- Внутренние маршруты (`/healthz`, `/metrics`, `/swagger`) исключены из трассировки — инструментируются только
+  версионированные группы API.
+
+Конфигурация (см. [.env.example](.env.example)):
+
+| Переменная              | По умолчанию       | Описание                            |
+|-------------------------|--------------------|-------------------------------------|
+| `TRACING_ENABLED`       | `false`            | Включить трассировку OpenTelemetry  |
+| `TRACING_OTLP_ENDPOINT` | `localhost:4317`   | Адрес OTLP/gRPC коллектора           |
+| `TRACING_OTLP_INSECURE` | `true`             | Отключить TLS для OTLP-экспортёра    |
+| `TRACING_SAMPLE_RATE`   | `0.1`              | Parent-based коэффициент сэмплирования |
 
 ## Структура проекта
 
@@ -115,6 +201,17 @@ make compose-up-all
 Пример: [.env.example](.env.example)
 
 [docker-compose.yml](docker-compose.yml) использует переменные `env` для настройки сервисов.
+
+HTTP запускается всегда. Остальные транспорты и защита HTTP настраиваются здесь:
+
+| Переменная              | По умолчанию | Описание                                                      |
+|-------------------------|--------------|---------------------------------------------------------------|
+| `GRPC_ENABLED`          | `true`       | Запускать gRPC-сервер                                         |
+| `RMQ_ENABLED`           | `true`       | Запускать RabbitMQ RPC-сервер (выключен: RabbitMQ не нужен)   |
+| `NATS_ENABLED`          | `true`       | Запускать NATS RPC-сервер (выключен: NATS не нужен)           |
+| `CORS_ALLOWED_ORIGINS`  | `*`          | Источники, с которых браузер может вызывать REST API, через запятую |
+| `RATE_LIMIT_MAX`        | `100`        | Запросов от одного клиента за окно                            |
+| `RATE_LIMIT_EXPIRATION` | `1m`         | Окно ограничения запросов                                     |
 
 ### `docs`
 
@@ -156,9 +253,10 @@ go run -tags migrate ./cmd/app
 
 ### `internal/controller`
 
-Слой хэндлеров сервера (MVC контроллеры). В шаблоне показана работа 3 серверов:
+Слой хэндлеров сервера (MVC контроллеры). В шаблоне показана работа 4 серверов:
 
 - AMQP RPC (на основе RabbitMQ в качестве транспорта)
+- NATS RPC (на основе NATS в качестве транспорта)
 - gRPC ([gRPC](https://grpc.io/) фреймворк на основе protobuf)
 - REST API ([Fiber](https://github.com/gofiber/fiber) фреймворк)
 
@@ -178,7 +276,7 @@ go run -tags migrate ./cmd/app
 routes := make(map[string]server.CallHandler)
 
 {
-    v1.NewTranslationRoutes(routes, t, l)
+    v1.NewRoutes(routes, t, u, tk, j, l)
 }
 
 {
@@ -195,10 +293,14 @@ routes := make(map[string]server.CallHandler)
 
 ```go
 {
+    v1.NewAuthRoutes(app, u, l)
+    v1.NewTaskRoutes(app, tk, l)
     v1.NewTranslationRoutes(app, t, l)
 }
 
 {
+    v2.NewAuthRoutes(app, u, l)
+    v2.NewTaskRoutes(app, tk, l)
     v2.NewTranslationRoutes(app, t, l)
 }
 
@@ -215,7 +317,7 @@ reflection.Register(app)
 routes := make(map[string]server.CallHandler)
 
 {
-    v1.NewTranslationRoutes(routes, t, l)
+    v1.NewRoutes(routes, t, u, tk, j, l)
 }
 
 {
@@ -232,11 +334,11 @@ routes := make(map[string]server.CallHandler)
 ```go
 apiV1Group := app.Group("/v1")
 {
-    v1.NewTranslationRoutes(apiV1Group, t, l)
+	v1.NewRoutes(apiV1Group, t, u, tk, jwtManager, l)
 }
 apiV2Group := app.Group("/v2")
 {
-	v2.NewTranslationRoutes(apiV2Group, t, l)
+	v2.NewRoutes(apiV2Group, t, u, tk, jwtManager, l)
 }
 ```
 
@@ -279,6 +381,12 @@ RabbitMQ RPC паттерн:
 - Используется fanout-обмен, к которому привязана одна эксклюзивная очередь - это наиболее производительная конфигурация
 - Переподключение при потере соединения
 
+### `pkg/tracing`
+
+Настройка OpenTelemetry: конфигурирует глобальный `TracerProvider` с экспортёром OTLP/gRPC и пропагаторами W3C
+trace-context + baggage. При отключённой трассировке устанавливается no-op provider, поэтому код инструментации
+выполняется безусловно. См. [Наблюдаемость](#наблюдаемость).
+
 ## Внедрение зависимостей
 
 Для устранения зависимости бизнес-логики от внешних пакетов используется внедрение зависимостей.
@@ -314,7 +422,7 @@ func (uc *UseCase) Do() {
 ```
 
 Благодаря разделению через интерфейсы можно генерировать моки (например,
-используя [mockery](https://github.com/vektra/mockery)) и легко писать юнит-тесты.
+используя [go.uber.org/mock](https://go.uber.org/mock)) и легко писать юнит-тесты.
 
 > Мы не привязаны к конкретным реализациям и всегда можем заменить один компонент на другой.
 > Если новый компонент реализует интерфейс, то в бизнес-логике ничего не нужно менять.
@@ -399,9 +507,9 @@ func (uc *UseCase) Do() {
 - **Use Cases** - это бизнес-логика. Располагается в папке `internal/usecase`.
 
 Слой, с которым бизнес-логика взаимодействует напрямую, обычно называется _инфраструктурным_ слоем.
-Это может быть репозиторий `internal/usecase/repo`, внешнее webapi `internal/usecase/webapi`, любой пакет или
+Это может быть репозиторий `internal/repo/persistent`, внешнее webapi `internal/repo/webapi`, любой пакет или
 микросервис.
-В шаблоне пакеты _infrastructure_ размещены внутри `internal/usecase`.
+В шаблоне пакеты _infrastructure_ размещены внутри `internal/repo`.
 
 Вы можете выбирать, как называть точки входа, по своему усмотрению. Варианты такие:
 
