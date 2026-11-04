@@ -27,9 +27,9 @@ compose-up-all: ### Run docker compose (with backend and reverse proxy)
 	$(BASE_STACK) up --build -d
 .PHONY: compose-up-all
 
-compose-up-integration-test: ### Run docker compose with integration test
+compose-up-integration-test: ### Run docker compose with integration test (on an empty database: its volumes go after)
 	$(INTEGRATION_TEST_STACK) up --build --abort-on-container-exit --exit-code-from integration-test; exit_code=$$?; \
-	$(INTEGRATION_TEST_STACK) down --remove-orphans; exit $$exit_code
+	$(INTEGRATION_TEST_STACK) down --remove-orphans --volumes; exit $$exit_code
 .PHONY: compose-up-integration-test
 
 compose-down: ### Down docker compose
@@ -112,6 +112,27 @@ bin-deps: ### install tools
 	go install tool
 	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate
 .PHONY: bin-deps
+
+contract-sync: ### copy the client's contract in: make contract-sync FROM=<the client's repository>
+	@test -n "$(FROM)" || (echo "contract-sync: make contract-sync FROM=<the client's repository, with api/openapi.json>"; exit 1)
+	cp "$(FROM)/api/openapi.json" api/openapi.json
+	go run ./cmd/contract
+.PHONY: contract-sync
+
+contract-status: ### how much of the client's contract is built (go run ./cmd/contract -all lists every operation)
+	go run ./cmd/contract
+.PHONY: contract-status
+
+verify: ### what CI runs, here, before a push: tidy modules, formatted code, lint, unit tests, the contract, the integration suite in Docker
+	go mod tidy -diff
+	@test -z "$$(go fix -diff ./...)" || (echo "verify: go fix would change code: run make format"; exit 1)
+	@test -z "$$(gofumpt -l .)" || (echo "verify: not formatted, run make format:"; gofumpt -l .; exit 1)
+	@test -z "$$(gci list . --skip-generated -s standard -s default)" || (echo "verify: imports not grouped, run make format"; exit 1)
+	$(MAKE) linter-golangci
+	$(MAKE) test
+	go run ./cmd/contract
+	$(MAKE) compose-up-integration-test
+.PHONY: verify
 
 pre-commit: deps swag-v1 proto-v1 mock format linter-golangci test ### run pre-commit
 .PHONY: pre-commit

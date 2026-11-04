@@ -7,22 +7,12 @@ import (
 	"errors"
 	"fmt"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/evrone/go-clean-template/internal/entity"
 	"github.com/evrone/go-clean-template/internal/repo"
 	"github.com/evrone/go-clean-template/pkg/postgres"
 	"github.com/jackc/pgx/v5"
 )
-
-// A person, their group and their workspaces; no workspace listed is every one (NULL).
-const _select = `
-SELECT u.id, u.name, u.email, u.role, u.password_hash,
-       COALESCE(g.id, ''), COALESCE(g.name, ''), COALESCE(g.grants, '{}'), COALESCE(g.doctor, false),
-       array_agg(uw.workspace_id ORDER BY uw.workspace_id) FILTER (WHERE uw.workspace_id IS NOT NULL)
-FROM users u
-LEFT JOIN permission_groups g ON g.id = u.group_id
-LEFT JOIN user_workspaces uw ON uw.user_id = u.id
-WHERE %s = $1
-GROUP BY u.id, g.id`
 
 // Repo -.
 type Repo struct {
@@ -36,23 +26,38 @@ func New(pg *postgres.Postgres) repo.PrincipalRepo {
 
 // ByID -.
 func (r *Repo) ByID(ctx context.Context, userID string) (entity.Principal, error) {
-	p, _, err := r.one(ctx, "u.id::text", userID)
+	p, _, err := r.one(ctx, sq.Eq{"u.id::text": userID})
 
 	return p, err
 }
 
 // ByEmail -.
 func (r *Repo) ByEmail(ctx context.Context, email string) (entity.Principal, string, error) {
-	return r.one(ctx, "lower(u.email)", email)
+	return r.one(ctx, sq.Eq{"lower(u.email)": email})
 }
 
-func (r *Repo) one(ctx context.Context, column, value string) (entity.Principal, string, error) {
+// one is a person, their group and their workspaces; no workspace listed is every one (NULL).
+func (r *Repo) one(ctx context.Context, where sq.Eq) (entity.Principal, string, error) {
 	var (
 		p    entity.Principal
 		hash string
 	)
 
-	err := r.Pool.QueryRow(ctx, fmt.Sprintf(_select, column), value).
+	sql, args, err := r.Builder.
+		Select("u.id::text", "u.name", "u.email", "u.role", "u.password_hash",
+			"COALESCE(g.id, '')", "COALESCE(g.name, '')", "COALESCE(g.grants, '{}')", "COALESCE(g.doctor, false)",
+			"array_agg(uw.workspace_id ORDER BY uw.workspace_id) FILTER (WHERE uw.workspace_id IS NOT NULL)").
+		From("users u").
+		LeftJoin("permission_groups g ON g.id = u.group_id").
+		LeftJoin("user_workspaces uw ON uw.user_id = u.id").
+		Where(where).
+		GroupBy("u.id", "g.id").
+		ToSql()
+	if err != nil {
+		return entity.Principal{}, "", fmt.Errorf("PrincipalRepo - one - r.Builder: %w", err)
+	}
+
+	err = r.Pool.QueryRow(ctx, sql, args...).
 		Scan(&p.UserID, &p.Name, &p.Email, &p.Role, &hash, &p.Group, &p.GroupName, &p.Grants, &p.Doctor, &p.Workspaces)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

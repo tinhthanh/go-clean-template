@@ -9,21 +9,13 @@ import (
 	"fmt"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/evrone/go-clean-template/internal/entity"
 	"github.com/evrone/go-clean-template/internal/repo"
 	"github.com/evrone/go-clean-template/pkg/postgres"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
-
-const _insert = `
-INSERT INTO audit_log (actor_id, actor_name, branch, action, resource, target, rows, changes)
-VALUES (NULLIF($1, '')::uuid, $2, NULLIF($3, ''), $4, $5, $6, NULLIF($7, 0), $8)`
-
-// The same actor's same line on the same target, within the window.
-const _recent = `
-SELECT EXISTS (SELECT 1 FROM audit_log
-WHERE actor_id = NULLIF($1, '')::uuid AND action = $2 AND resource = $3 AND target = $4 AND at > now() - $5::interval)`
 
 // Repo -.
 type Repo struct {
@@ -37,7 +29,7 @@ func New(pg *postgres.Postgres) repo.AuditRepo {
 
 // Write -.
 func (r *Repo) Write(ctx context.Context, line *entity.AuditLine) error {
-	return write(ctx, r.Pool, line)
+	return r.write(ctx, r.Pool, line)
 }
 
 // WriteOnce holds a lock on the line's key for the transaction, so two
@@ -55,10 +47,18 @@ func (r *Repo) WriteOnce(ctx context.Context, line *entity.AuditLine, within tim
 		return false, fmt.Errorf("AuditRepo - WriteOnce - lock: %w", err)
 	}
 
-	var seen bool
-
-	err = tx.QueryRow(ctx, _recent, line.ActorID, line.Action, line.Resource, line.Target, within.String()).Scan(&seen)
+	// The same actor's same line on the same target, within the window.
+	sql, args, err := r.Builder.Select("count(*) > 0").From("audit_log").Where(sq.And{
+		sq.Expr("actor_id = NULLIF(?, '')::uuid", line.ActorID),
+		sq.Eq{"action": line.Action, "resource": line.Resource, "target": line.Target},
+		sq.Expr("at > now() - ?::interval", within.String()),
+	}).ToSql()
 	if err != nil {
+		return false, fmt.Errorf("AuditRepo - WriteOnce - r.Builder: %w", err)
+	}
+
+	var seen bool
+	if err = tx.QueryRow(ctx, sql, args...).Scan(&seen); err != nil {
 		return false, fmt.Errorf("AuditRepo - WriteOnce - recent: %w", err)
 	}
 
@@ -66,7 +66,7 @@ func (r *Repo) WriteOnce(ctx context.Context, line *entity.AuditLine, within tim
 		return false, nil
 	}
 
-	if writeErr := write(ctx, tx, line); writeErr != nil {
+	if writeErr := r.write(ctx, tx, line); writeErr != nil {
 		return false, writeErr
 	}
 
@@ -89,7 +89,7 @@ type execer interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
-func write(ctx context.Context, db execer, line *entity.AuditLine) error {
+func (r *Repo) write(ctx context.Context, db execer, line *entity.AuditLine) error {
 	var changes []byte
 
 	if len(line.Changes) > 0 {
@@ -99,8 +99,16 @@ func write(ctx context.Context, db execer, line *entity.AuditLine) error {
 		}
 	}
 
-	_, err := db.Exec(ctx, _insert, line.ActorID, line.ActorName, line.Branch, line.Action, line.Resource, line.Target, line.Rows, changes)
+	sql, args, err := r.Builder.Insert("audit_log").
+		Columns("actor_id", "actor_name", "branch", "action", "resource", "target", "rows", "changes").
+		Values(sq.Expr("NULLIF(?, '')::uuid", line.ActorID), line.ActorName, sq.Expr("NULLIF(?, '')", line.Branch),
+			line.Action, line.Resource, line.Target, sq.Expr("NULLIF(?, 0)", line.Rows), changes).
+		ToSql()
 	if err != nil {
+		return fmt.Errorf("AuditRepo - write - r.Builder: %w", err)
+	}
+
+	if _, err = db.Exec(ctx, sql, args...); err != nil {
 		return fmt.Errorf("AuditRepo - write - db.Exec: %w", err)
 	}
 

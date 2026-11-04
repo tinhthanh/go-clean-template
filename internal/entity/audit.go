@@ -16,7 +16,7 @@ type AuditLine struct {
 
 // Change is one field's old and new value, as a line of the log keeps it.
 type Change struct {
-	Field string
-	From  string
-	To    string
+	Field string `json:"field"`
+	From  string `json:"from"`
+	To    string `json:"to"`
 }

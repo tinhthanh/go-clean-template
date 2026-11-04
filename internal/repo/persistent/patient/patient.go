@@ -165,13 +165,17 @@ func (r *Repo) Get(ctx context.Context, id string) (entity.Patient, error) {
 
 // Store issues the code from the counter: KH-000001 on, never reused.
 func (r *Repo) Store(ctx context.Context, p *entity.Patient) error {
-	err := r.Pool.QueryRow(ctx, `
-INSERT INTO patients (code, workspace, name, gender, birth, phone, cccd, email, address, occupation, note, tags)
-VALUES ('KH-' || lpad(nextval('patient_code_seq')::text, 6, '0'), $1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id::text, code, created_at, updated_at`,
-		p.Workspace, p.Name, p.Gender, p.Birth, p.Phone, p.CCCD, p.Email, p.Address, p.Occupation, p.Note, tagsOf(p),
-	).Scan(&p.ID, &p.Code, &p.CreatedAt, &p.UpdatedAt)
+	sql, args, err := r.Builder.Insert("patients").
+		Columns("code", "workspace", "name", "gender", "birth", "phone", "cccd", "email", "address", "occupation", "note", "tags").
+		Values(sq.Expr("'KH-' || lpad(nextval('patient_code_seq')::text, 6, '0')"), p.Workspace, p.Name, sq.Expr("NULLIF(?, '')", p.Gender),
+			p.Birth, p.Phone, p.CCCD, p.Email, p.Address, p.Occupation, p.Note, tagsOf(p)).
+		Suffix("RETURNING id::text, code, created_at, updated_at").
+		ToSql()
 	if err != nil {
+		return fmt.Errorf("PatientRepo - Store - r.Builder: %w", err)
+	}
+
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&p.ID, &p.Code, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return fmt.Errorf("PatientRepo - Store - QueryRow: %w", err)
 	}
 
@@ -180,13 +184,15 @@ RETURNING id::text, code, created_at, updated_at`,
 
 // Update -.
 func (r *Repo) Update(ctx context.Context, p *entity.Patient) error {
-	err := r.Pool.QueryRow(ctx, `
-UPDATE patients SET name = $2, gender = NULLIF($3, ''), birth = $4, phone = $5, cccd = $6, email = $7,
-       address = $8, occupation = $9, note = $10, updated_at = now()
-WHERE id::text = $1
-RETURNING updated_at`,
-		p.ID, p.Name, p.Gender, p.Birth, p.Phone, p.CCCD, p.Email, p.Address, p.Occupation, p.Note,
-	).Scan(&p.UpdatedAt)
+	sql, args, err := r.Builder.Update("patients").SetMap(map[string]any{
+		"name": p.Name, "gender": sq.Expr("NULLIF(?, '')", p.Gender), "birth": p.Birth, "phone": p.Phone, "cccd": p.CCCD,
+		"email": p.Email, "address": p.Address, "occupation": p.Occupation, "note": p.Note, "updated_at": sq.Expr("now()"),
+	}).Where(sq.Eq{"id::text": p.ID}).Suffix("RETURNING updated_at").ToSql()
+	if err != nil {
+		return fmt.Errorf("PatientRepo - Update - r.Builder: %w", err)
+	}
+
+	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return entity.ErrNotFound
 	}

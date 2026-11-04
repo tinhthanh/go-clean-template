@@ -51,13 +51,13 @@ type (
 
 	// GRPC -.
 	grpc struct {
-		Enabled bool   `env:"GRPC_ENABLED" envDefault:"true"`
+		Enabled bool   `env:"GRPC_ENABLED" envDefault:"false"`
 		Port    string `env:"GRPC_PORT,required"`
 	}
 
 	// RMQ -.
 	rmq struct {
-		Enabled        bool   `env:"RMQ_ENABLED" envDefault:"true"`
+		Enabled        bool   `env:"RMQ_ENABLED" envDefault:"false"`
 		ServerExchange string `env:"RMQ_RPC_SERVER,required"`
 		ClientExchange string `env:"RMQ_RPC_CLIENT,required"`
 		URL            string `env:"RMQ_URL,required"`
@@ -65,7 +65,7 @@ type (
 
 	// NATS -.
 	nats struct {
-		Enabled        bool   `env:"NATS_ENABLED" envDefault:"true"`
+		Enabled        bool   `env:"NATS_ENABLED" envDefault:"false"`
 		ServerExchange string `env:"NATS_RPC_SERVER,required"`
 		URL            string `env:"NATS_URL,required"`
 	}

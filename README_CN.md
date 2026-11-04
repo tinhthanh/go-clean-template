@@ -45,8 +45,9 @@ golang服务的整洁架构模板
 - **用户认证** — 注册、登录、基于 JWT 的授权
 - **任务管理** — CRUD 操作，支持状态转换（todo、in_progress、done）
 - **翻译** — 文本翻译与历史记录
+- **客户端 API** — 浏览器客户端自己的契约（`api/openapi.json`），挂在 `/api` 下，仅 REST：会话 cookie，以及契约在每个操作旁写明的权限、分店、遮蔽和审计；已实现患者，其余返回 501
 
-所有领域在四种传输协议（REST、gRPC、AMQP RPC、NATS RPC）上均可用。
+三个领域在四种传输协议（REST、gRPC、AMQP RPC、NATS RPC）上均可用；客户端 API 仅支持 REST。默认只启动 HTTP：`GRPC_ENABLED`、`RMQ_ENABLED` 和 `NATS_ENABLED` 开启其余协议。
 
 ## 内容
 
@@ -100,6 +101,28 @@ CRUD 操作，支持状态状态机。
 |----|-------------------------------------|-----------------------------------------|
 | 翻译 | `POST /v1/translation/do-translate` | `TranslationHistoryService/DoTranslate` |
 | 历史 | `GET /v1/translation/history`       | `TranslationHistoryService/ShowHistory` |
+
+### 客户端 API
+
+浏览器客户端的后端，其契约为 `api/openapi.json`（用 `make contract-sync FROM=<客户端仓库>` 从客户端复制）。
+契约中的每个操作都在 `/api` 下有路由；尚未实现的返回 `501`，代码为 `unavailable`（`make contract-status`
+统计数量）。每个应答都经过契约在操作旁写明的规则：`x-permission`（调用者所在组的授权）、`x-branch-scoped`、
+`x-masks` 和 `x-audit`。
+
+| 操作           | REST                         | 规则                                                        |
+|----------------|------------------------------|-------------------------------------------------------------|
+| 登录           | `POST /api/session`          | 设置 `session` 和 `refresh` cookie（httpOnly、Secure、SameSite=Lax） |
+| 当前登录者     | `GET /api/session`           | `signed-in`                                                 |
+| 延长会话       | `POST /api/session/refresh`  | `refresh` cookie                                            |
+| 退出           | `DELETE /api/session`        | `signed-in`                                                 |
+| 患者列表       | `GET /api/patients`          | `pat.patient.view`；分页含 `next`、`total`、`summary`       |
+| 查看患者       | `GET /api/patients/:id`      | `pat.patient.view`；无 `patient.phone.view_full` 时电话被遮蔽；每人每位患者 10 分钟一条日志 |
+| 新建患者       | `POST /api/patients`         | `pat.patient.create`，且在调用者的分店之一                  |
+| 修改患者       | `PATCH /api/patients/:id`    | `pat.patient.edit`；日志保留每个字段的旧值和新值            |
+
+- 每次写入都带 `X-Requested-With: XMLHttpRequest`（CSRF）；`X-Branch` 指明日志行所属分店
+- 拒绝采用契约的 `Error`：`{error, code, field}`，代码为 `unauthorized`、`forbidden`、`not_member`、`not_found`、`invalid`、`unavailable`
+- 日志表（`audit_log`）只追加：数据库拒绝 `UPDATE`、`DELETE` 和 `TRUNCATE`
 
 ## Quick start
 
@@ -201,12 +224,16 @@ HTTP 始终运行。其他传输方式和 HTTP 防护在此配置：
 
 | 变量                    | 默认值 | 说明                                         |
 |-------------------------|--------|----------------------------------------------|
-| `GRPC_ENABLED`          | `true` | 启动 gRPC 服务器                             |
-| `RMQ_ENABLED`           | `true` | 启动 RabbitMQ RPC 服务器（关闭时无需 RabbitMQ） |
-| `NATS_ENABLED`          | `true` | 启动 NATS RPC 服务器（关闭时无需 NATS）       |
+| `GRPC_ENABLED`          | `false` | 启动 gRPC 服务器                             |
+| `RMQ_ENABLED`           | `false` | 启动 RabbitMQ RPC 服务器（关闭时无需 RabbitMQ） |
+| `NATS_ENABLED`          | `false` | 启动 NATS RPC 服务器（关闭时无需 NATS）       |
 | `CORS_ALLOWED_ORIGINS`  | `*`    | 允许浏览器调用 REST API 的来源，逗号分隔      |
 | `RATE_LIMIT_MAX`        | `100`  | 每个客户端每个时间窗口的请求数               |
 | `RATE_LIMIT_EXPIRATION` | `1m`   | 限流时间窗口                                 |
+| `API_PREFIX`            | `/api` | 客户端 API 的挂载路径                        |
+| `SESSION_COOKIE_SECURE` | `true` | 会话 cookie 仅经 HTTPS 发送（仅在纯 HTTP 测试环境中关闭） |
+| `SESSION_LENGTH`        | `8h`   | 会话 cookie 的时长                           |
+| `SESSION_REFRESH_LENGTH`| `168h` | 刷新 cookie 的时长                           |
 
 ### `docs`
 

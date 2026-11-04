@@ -45,8 +45,9 @@
 - **Аутентификация пользователей** — регистрация, вход, авторизация на основе JWT
 - **Управление задачами** — CRUD-операции с переходами статусов (todo, in_progress, done)
 - **Перевод** — перевод текста с сохранением истории
+- **API клиента** — собственный контракт браузерного клиента (`api/openapi.json`) под `/api`, только REST: сессия в cookie, права, филиалы, маски и журнал аудита, которые контракт пишет рядом с каждой операцией; готовы пациенты, остальное отвечает 501
 
-Все домены доступны через все четыре транспорта (REST, gRPC, AMQP RPC, NATS RPC).
+Три домена доступны через все четыре транспорта (REST, gRPC, AMQP RPC, NATS RPC); API клиента — только REST. По умолчанию запускается только HTTP: `GRPC_ENABLED`, `RMQ_ENABLED` и `NATS_ENABLED` включают остальные.
 
 ## Содержание
 
@@ -100,6 +101,29 @@ CRUD-операции со стейт-машиной статусов.
 |----------|-------------------------------------|-----------------------------------------|
 | Перевод  | `POST /v1/translation/do-translate` | `TranslationHistoryService/DoTranslate` |
 | История  | `GET /v1/translation/history`       | `TranslationHistoryService/ShowHistory` |
+
+### API клиента
+
+Бэкенд браузерного клиента, чей контракт — `api/openapi.json` (копируется из клиента командой
+`make contract-sync FROM=<репозиторий клиента>`). Каждая операция контракта получает маршрут под `/api`;
+ещё не реализованная отвечает `501` с кодом `unavailable` (`make contract-status` их считает). Каждый
+ответ проходит правила, которые контракт пишет рядом с операцией: `x-permission` (права группы
+вызывающего), `x-branch-scoped`, `x-masks` и `x-audit`.
+
+| Операция       | REST                         | Правило                                                     |
+|----------------|------------------------------|-------------------------------------------------------------|
+| Вход           | `POST /api/session`          | ставит cookie `session` и `refresh` (httpOnly, Secure, SameSite=Lax) |
+| Кто вошёл      | `GET /api/session`           | `signed-in`                                                 |
+| Продлить сессию | `POST /api/session/refresh` | cookie `refresh`                                            |
+| Выход          | `DELETE /api/session`        | `signed-in`                                                 |
+| Список пациентов | `GET /api/patients`        | `pat.patient.view`; страница с `next`, `total`, `summary`   |
+| Пациент        | `GET /api/patients/:id`      | `pat.patient.view`; телефон скрыт без `patient.phone.view_full`; одна строка журнала на человека и пациента за 10 минут |
+| Создать пациента | `POST /api/patients`       | `pat.patient.create`, в одном из филиалов вызывающего       |
+| Изменить пациента | `PATCH /api/patients/:id` | `pat.patient.edit`; журнал хранит старое и новое значение каждого поля |
+
+- Каждая запись несёт `X-Requested-With: XMLHttpRequest` (CSRF); `X-Branch` называет филиал строк журнала
+- Отказы — `Error` контракта: `{error, code, field}` с `unauthorized`, `forbidden`, `not_member`, `not_found`, `invalid`, `unavailable`
+- Журнал (`audit_log`) только дополняется: база отклоняет `UPDATE`, `DELETE` и `TRUNCATE`
 
 ## Быстрый старт
 
@@ -206,12 +230,16 @@ HTTP запускается всегда. Остальные транспорт�
 
 | Переменная              | По умолчанию | Описание                                                      |
 |-------------------------|--------------|---------------------------------------------------------------|
-| `GRPC_ENABLED`          | `true`       | Запускать gRPC-сервер                                         |
-| `RMQ_ENABLED`           | `true`       | Запускать RabbitMQ RPC-сервер (выключен: RabbitMQ не нужен)   |
-| `NATS_ENABLED`          | `true`       | Запускать NATS RPC-сервер (выключен: NATS не нужен)           |
+| `GRPC_ENABLED`          | `false`      | Запускать gRPC-сервер                                         |
+| `RMQ_ENABLED`           | `false`      | Запускать RabbitMQ RPC-сервер (выключен: RabbitMQ не нужен)   |
+| `NATS_ENABLED`          | `false`      | Запускать NATS RPC-сервер (выключен: NATS не нужен)           |
 | `CORS_ALLOWED_ORIGINS`  | `*`          | Источники, с которых браузер может вызывать REST API, через запятую |
 | `RATE_LIMIT_MAX`        | `100`        | Запросов от одного клиента за окно                            |
 | `RATE_LIMIT_EXPIRATION` | `1m`         | Окно ограничения запросов                                     |
+| `API_PREFIX`            | `/api`       | Где смонтирован API клиента                                   |
+| `SESSION_COOKIE_SECURE` | `true`       | Cookie сессии только по HTTPS (выключать только в тестовом стеке на HTTP) |
+| `SESSION_LENGTH`        | `8h`         | Срок cookie сессии                                            |
+| `SESSION_REFRESH_LENGTH`| `168h`       | Срок cookie обновления                                        |
 
 ### `docs`
 
