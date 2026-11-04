@@ -5,9 +5,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"github.com/Masterminds/squirrel"
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -47,7 +49,8 @@ func New(url string, opts ...Option) (*Postgres, error) {
 		return nil, fmt.Errorf("postgres - NewPostgres - pgxpool.ParseConfig: %w", err)
 	}
 
-	poolConfig.MaxConns = int32(pg.maxPoolSize) //nolint:gosec // skip integer overflow conversion int -> int32
+	poolConfig.MaxConns = safeIntToInt32(pg.maxPoolSize)
+	poolConfig.ConnConfig.Tracer = otelpgx.NewTracer()
 
 	for pg.connAttempts > 0 {
 		pg.Pool, err = pgxpool.NewWithConfig(context.Background(), poolConfig)
@@ -74,4 +77,10 @@ func (p *Postgres) Close() {
 	if p.Pool != nil {
 		p.Pool.Close()
 	}
+}
+
+func safeIntToInt32(v int) int32 {
+	clamped := v & math.MaxInt32
+
+	return int32(clamped)
 }

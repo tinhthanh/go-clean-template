@@ -6,9 +6,8 @@ import (
 
 	"github.com/evrone/go-clean-template/internal/entity"
 	"github.com/evrone/go-clean-template/internal/repo"
+	"github.com/evrone/go-clean-template/internal/usecase"
 )
-
-const _defaultHistoryLimit = 100
 
 // UseCase -.
 type UseCase struct {
@@ -16,17 +15,17 @@ type UseCase struct {
 	webAPI repo.TranslationWebAPI
 }
 
-// New -.
-func New(r repo.TranslationRepo, w repo.TranslationWebAPI) *UseCase {
-	return &UseCase{
+// New returns a Translation usecase instrumented with OpenTelemetry tracing spans.
+func New(r repo.TranslationRepo, w repo.TranslationWebAPI) usecase.Translation {
+	return newTraced(&UseCase{
 		repo:   r,
 		webAPI: w,
-	}
+	})
 }
 
 // History - getting translate history from store.
-func (uc *UseCase) History(ctx context.Context) (entity.TranslationHistory, error) {
-	translations, err := uc.repo.GetHistory(ctx, _defaultHistoryLimit, 0)
+func (uc *UseCase) History(ctx context.Context, userID string) (entity.TranslationHistory, error) {
+	translations, err := uc.repo.GetHistory(ctx, userID)
 	if err != nil {
 		return entity.TranslationHistory{}, fmt.Errorf("TranslationUseCase - History - s.repo.GetHistory: %w", err)
 	}
@@ -35,15 +34,15 @@ func (uc *UseCase) History(ctx context.Context) (entity.TranslationHistory, erro
 }
 
 // Translate -.
-func (uc *UseCase) Translate(ctx context.Context, t entity.Translation) (entity.Translation, error) {
+func (uc *UseCase) Translate(ctx context.Context, userID string, t entity.Translation) (entity.Translation, error) {
 	translation, err := uc.webAPI.Translate(ctx, t)
 	if err != nil {
-		return entity.Translation{}, entity.NewAppError(entity.ErrExternalService, fmt.Errorf("TranslationUseCase - Translate - s.webAPI.Translate: %w", err))
+		return entity.Translation{}, fmt.Errorf("TranslationUseCase - Translate - s.webAPI.Translate: %w", err)
 	}
 
-	err = uc.repo.Store(ctx, translation)
+	err = uc.repo.Store(ctx, userID, translation)
 	if err != nil {
-		return entity.Translation{}, entity.NewAppError(entity.ErrInternal, fmt.Errorf("TranslationUseCase - Translate - s.repo.Store: %w", err))
+		return entity.Translation{}, fmt.Errorf("TranslationUseCase - Translate - s.repo.Store: %w", err)
 	}
 
 	return translation, nil

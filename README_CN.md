@@ -6,7 +6,6 @@ golang服务的整洁架构模板
 
 [![Release](https://img.shields.io/github/v/release/evrone/go-clean-template.svg)](https://github.com/evrone/go-clean-template/releases/)
 [![License](https://img.shields.io/badge/License-MIT-success)](https://github.com/evrone/go-clean-template/blob/master/LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/evrone/go-clean-template)](https://goreportcard.com/report/github.com/evrone/go-clean-template)
 [![codecov](https://codecov.io/gh/evrone/go-clean-template/branch/master/graph/badge.svg?token=XE3E0X3EVQ)](https://codecov.io/gh/evrone/go-clean-template)
 
 [![Web Framework](https://img.shields.io/badge/Fiber-Web%20Framework-blue)](https://github.com/gofiber/fiber)
@@ -17,6 +16,7 @@ golang服务的整洁架构模板
 [![Database Migrations](https://img.shields.io/badge/Migrations-Seamless%20Schema%20Updates-blue)](https://github.com/golang-migrate/migrate)
 [![Logging](https://img.shields.io/badge/ZeroLog-Structured%20Logging-blue)](https://github.com/rs/zerolog)
 [![Metrics](https://img.shields.io/badge/Prometheus-Metrics%20Integration-blue)](https://github.com/ansrivas/fiberprometheus)
+[![Tracing](https://img.shields.io/badge/OpenTelemetry-Distributed%20Tracing-blue)](https://opentelemetry.io/)
 [![Testing](https://img.shields.io/badge/Testify-Testing%20Framework-blue)](https://github.com/stretchr/testify)
 [![Mocking](https://img.shields.io/badge/Mock-Mocking%20Library-blue)](https://go.uber.org/mock)
 
@@ -33,19 +33,73 @@ golang服务的整洁架构模板
 [Go 整洁模板](https://evrone.com/go-clean-template?utm_source=github&utm_campaign=go-clean-template) 由
 [Evrone](https://evrone.com/?utm_source=github&utm_campaign=go-clean-template) 创建和提供支持.
 
-此模板实现了三种类型的服务器：
+此模板实现了四种类型的服务器：
 
 - AMQP RPC（基于 RabbitMQ 作为传输）
 - NATS RPC（基于 NATS 作为传输）
 - gRPC（基于 protobuf 的 [gRPC](https://grpc.io/) 框架）
 - REST API（基于 [Fiber](https://github.com/gofiber/fiber) 框架）
 
+模板包含三个领域，演示多服务架构：
+
+- **用户认证** — 注册、登录、基于 JWT 的授权
+- **任务管理** — CRUD 操作，支持状态转换（todo、in_progress、done）
+- **翻译** — 文本翻译与历史记录
+
+所有领域在四种传输协议（REST、gRPC、AMQP RPC、NATS RPC）上均可用。
+
 ## 内容
 
+- [领域](#领域)
 - [快速开始](#快速开始)
+- [可观测性](#可观测性)
 - [工程架构](#工程架构)
 - [依赖注入](#依赖注入)
 - [整洁架构](#整洁架构)
+
+## 领域
+
+模板包含三个完整实现的领域，每个领域均可通过所有四种传输协议（REST、gRPC、AMQP RPC、NATS RPC）访问。
+
+### 用户认证
+
+注册、登录和基于 JWT 的授权。
+
+| 操作   | REST                     | gRPC                     |
+|------|--------------------------|--------------------------|
+| 注册   | `POST /v1/auth/register` | `AuthService/Register`   |
+| 登录   | `POST /v1/auth/login`    | `AuthService/Login`      |
+| 获取资料 | `GET /v1/user/profile`   | `AuthService/GetProfile` |
+
+- 密码使用 bcrypt 加密
+- JWT 令牌支持可配置的过期时间
+- 所有传输协议均有认证中间件
+
+### 任务管理
+
+CRUD 操作，支持状态状态机。
+
+| 操作   | REST                         | gRPC                         |
+|------|------------------------------|------------------------------|
+| 创建   | `POST /v1/tasks`             | `TaskService/CreateTask`     |
+| 列表   | `GET /v1/tasks`              | `TaskService/ListTasks`      |
+| 获取   | `GET /v1/tasks/:id`          | `TaskService/GetTask`        |
+| 更新   | `PUT /v1/tasks/:id`          | `TaskService/UpdateTask`     |
+| 状态转换 | `PATCH /v1/tasks/:id/status` | `TaskService/TransitionTask` |
+| 删除   | `DELETE /v1/tasks/:id`       | `TaskService/DeleteTask`     |
+
+- 状态转换：`todo` → `in_progress` → `done`（以及 `in_progress` → `todo`）
+- 支持 `limit`/`offset` 分页和可选状态过滤
+- 任务绑定到已认证的用户
+
+### 翻译
+
+通过外部 API 进行文本翻译，支持历史记录。
+
+| 操作 | REST                                | gRPC                                    |
+|----|-------------------------------------|-----------------------------------------|
+| 翻译 | `POST /v1/translation/do-translate` | `TranslationHistoryService/DoTranslate` |
+| 历史 | `GET /v1/translation/history`       | `TranslationHistoryService/ShowHistory` |
 
 ## Quick start
 
@@ -86,7 +140,9 @@ Check services:
   - http://app.lvh.me/swagger | http://127.0.0.1:8080/swagger
 - gRPC:
   - URL: `tcp://grpc.lvh.me:8081` | `tcp://127.0.0.1:8081`
-  - Proto: [v1/translation.history.proto](docs/proto/v1/translation.history.proto)
+  - [v1/auth.proto](docs/proto/v1/auth.proto)
+  - [v1/task.proto](docs/proto/v1/task.proto)
+  - [v1/translation.history.proto](docs/proto/v1/translation.history.proto)
 - PostgreSQL:
   - `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
 - RabbitMQ:
@@ -95,6 +151,33 @@ Check services:
 - NATS monitoring:
   - http://nats.lvh.me | http://127.0.0.1:8222/
   - Credentials: `guest` / `guest`
+- Jaeger (链路追踪 UI):
+  - http://jaeger.lvh.me | http://127.0.0.1:16686
+
+## 可观测性
+
+分布式链路追踪由 [OpenTelemetry](https://opentelemetry.io/) 提供。Span 通过 OTLP/gRPC 导出到收集器 —— docker 栈中为
+[Jaeger](https://www.jaegertracing.io/)。
+
+- **上下文传播** —— W3C `traceparent` + `baggage`，因此单条链路可贯穿全部四种传输协议。REST 使用
+  [otelfiber](https://github.com/gofiber/contrib/tree/main/otelfiber) 中间件，gRPC 使用
+  [otelgrpc](https://github.com/open-telemetry/opentelemetry-go-contrib) stats handler，AMQP RPC / NATS RPC 则通过自定义
+  carrier 将 trace 上下文携带在消息头中（`pkg/rabbitmq/rmq_rpc/otel_carrier.go`、
+  `pkg/nats/nats_rpc/otel_carrier.go`）。
+- **已插桩的层** —— use case 与 repository 都被包裹在链路追踪装饰器中（`*/tracing.go`），因此一条链路能展示完整路径：
+  controller → usecase → repo / webapi。
+- **禁用时为 No-op** —— 当 `TRACING_ENABLED=false` 时会安装 no-op tracer provider，因此插桩代码可无条件执行且无额外开销。
+- **采样** —— `TRACING_SAMPLE_RATE` 为 parent-based 比例。本地使用 `1.0`；生产环境请调低（`0.1` / `0.01`）。
+- 内部路由（`/healthz`、`/metrics`、`/swagger`）不参与链路追踪 —— 仅对带版本的 API 分组插桩。
+
+配置（见 [.env.example](.env.example)）：
+
+| 变量                     | 默认值             | 说明                        |
+|-------------------------|--------------------|-----------------------------|
+| `TRACING_ENABLED`       | `false`            | 启用 OpenTelemetry 链路追踪 |
+| `TRACING_OTLP_ENDPOINT` | `localhost:4317`   | OTLP/gRPC 收集器地址        |
+| `TRACING_OTLP_INSECURE` | `true`             | 关闭 OTLP 导出器的 TLS      |
+| `TRACING_SAMPLE_RATE`   | `0.1`              | parent-based 采样比例       |
 
 ## 工程架构
 
@@ -113,6 +196,17 @@ Check services:
 例如：[.env.example](.env.example)
 
 [docker-compose.yml](docker-compose.yml) 使用 `env` 變數來配置服務。
+
+HTTP 始终运行。其他传输方式和 HTTP 防护在此配置：
+
+| 变量                    | 默认值 | 说明                                         |
+|-------------------------|--------|----------------------------------------------|
+| `GRPC_ENABLED`          | `true` | 启动 gRPC 服务器                             |
+| `RMQ_ENABLED`           | `true` | 启动 RabbitMQ RPC 服务器（关闭时无需 RabbitMQ） |
+| `NATS_ENABLED`          | `true` | 启动 NATS RPC 服务器（关闭时无需 NATS）       |
+| `CORS_ALLOWED_ORIGINS`  | `*`    | 允许浏览器调用 REST API 的来源，逗号分隔      |
+| `RATE_LIMIT_MAX`        | `100`  | 每个客户端每个时间窗口的请求数               |
+| `RATE_LIMIT_EXPIRATION` | `1m`   | 限流时间窗口                                 |
 
 ### `docs`
 
@@ -152,9 +246,10 @@ go run -tags migrate ./cmd/app
 
 ### `internal/controller`
 
-服务器处理层（MVC 控制器）。模板展示了 3 种服务器：
+服务器处理层（MVC 控制器）。模板展示了 4 种服务器：
 
 - AMQP RPC（基于 RabbitMQ 作为传输）
+- NATS RPC（基于 NATS 作为传输）
 - gRPC（基于 protobuf 的 [gRPC](https://grpc.io/) 框架）
 - REST API（基于 [Fiber](https://github.com/gofiber/fiber) 框架）
 
@@ -174,7 +269,7 @@ go run -tags migrate ./cmd/app
 routes := make(map[string]server.CallHandler)
 
 {
-    v1.NewTranslationRoutes(routes, t, l)
+    v1.NewRoutes(routes, t, u, tk, j, l)
 }
 
 {
@@ -191,10 +286,14 @@ routes := make(map[string]server.CallHandler)
 
 ```go
 {
+    v1.NewAuthRoutes(app, u, l)
+    v1.NewTaskRoutes(app, tk, l)
     v1.NewTranslationRoutes(app, t, l)
 }
 
 {
+    v2.NewAuthRoutes(app, u, l)
+    v2.NewTaskRoutes(app, tk, l)
     v2.NewTranslationRoutes(app, t, l)
 }
 
@@ -211,7 +310,7 @@ reflection.Register(app)
 routes := make(map[string]server.CallHandler)
 
 {
-    v1.NewTranslationRoutes(routes, t, l)
+    v1.NewRoutes(routes, t, u, tk, j, l)
 }
 
 {
@@ -228,11 +327,11 @@ routes := make(map[string]server.CallHandler)
 ```go
 apiV1Group := app.Group("/v1")
 {
-	v1.NewTranslationRoutes(apiV1Group, t, l)
+	v1.NewRoutes(apiV1Group, t, u, tk, jwtManager, l)
 }
 apiV2Group := app.Group("/v2")
 {
-	v2.NewTranslationRoutes(apiV2Group, t, l)
+	v2.NewRoutes(apiV2Group, t, u, tk, jwtManager, l)
 }
 ```
 
@@ -272,6 +371,11 @@ RabbitMQ RPC 模式：
 - 使用Exchange fanout出并绑定 1 个独占队列，这么配置是最高效的
 - 在连接丢失时重新连接
 
+### `pkg/tracing`
+
+OpenTelemetry 配置：装配一个全局 `TracerProvider`，使用 OTLP/gRPC 导出器以及 W3C trace-context + baggage 传播器。
+当链路追踪被禁用时会安装 no-op provider，因此插桩代码可无条件执行。参见 [可观测性](#可观测性)。
+
 ## 依赖注入
 
 为了去除业务逻辑对外部包的依赖，使用了依赖注入.
@@ -279,7 +383,7 @@ RabbitMQ RPC 模式：
 这使得业务逻辑独立（且可移植）
 我们可以覆盖接口的实现，而无需更改 `usecase` 包.
 
-它还将允许我们自动生成相关mock（例如使用 [mockery](https://github.com/vektra/mockery)），以便进行单元测试.
+它还将允许我们自动生成相关mock（例如使用 [go.uber.org/mock](https://go.uber.org/mock)），以便进行单元测试.
 > 我们不依赖于特定的实现，以便始终能够将一个组件更改为另一个组件
 > 如果新组件实现了接口，则业务逻辑无需更改。
 
@@ -385,8 +489,8 @@ HTTP 和数据库都在外层，这意味着他们彼此无法感知
 
 - **Use Cases** 业务逻辑位于 `internal/usecase` 中
   与业务逻辑直接交互的层通常称为_infrastructure_ 层
-  这些可以是存储库 `internal/usecase/repo`、外部 webapi `internal/usecase/webapi`、任何包和其他微服务。
-  在模板中，_infrastructure_ 包位于 `internal/usecase` 中
+  这些可以是存储库 `internal/repo/persistent`、外部 webapi `internal/repo/webapi`、任何包和其他微服务。
+  在模板中，_infrastructure_ 包位于 `internal/repo` 中
 
 您可以根据需要决定你要调用的入口点，包括：
 

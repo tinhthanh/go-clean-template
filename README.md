@@ -9,7 +9,6 @@ Clean Architecture template for Golang services
 
 [![Release](https://img.shields.io/github/v/release/evrone/go-clean-template.svg)](https://github.com/evrone/go-clean-template/releases/)
 [![License](https://img.shields.io/badge/License-MIT-success)](https://github.com/evrone/go-clean-template/blob/master/LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/evrone/go-clean-template)](https://goreportcard.com/report/github.com/evrone/go-clean-template)
 [![codecov](https://codecov.io/gh/evrone/go-clean-template/branch/master/graph/badge.svg?token=XE3E0X3EVQ)](https://codecov.io/gh/evrone/go-clean-template)
 
 [![Web Framework](https://img.shields.io/badge/Fiber-Web%20Framework-blue)](https://github.com/gofiber/fiber)
@@ -20,6 +19,7 @@ Clean Architecture template for Golang services
 [![Database Migrations](https://img.shields.io/badge/Migrations-Seamless%20Schema%20Updates-blue)](https://github.com/golang-migrate/migrate)
 [![Logging](https://img.shields.io/badge/ZeroLog-Structured%20Logging-blue)](https://github.com/rs/zerolog)
 [![Metrics](https://img.shields.io/badge/Prometheus-Metrics%20Integration-blue)](https://github.com/ansrivas/fiberprometheus)
+[![Tracing](https://img.shields.io/badge/OpenTelemetry-Distributed%20Tracing-blue)](https://opentelemetry.io/)
 [![Testing](https://img.shields.io/badge/Testify-Testing%20Framework-blue)](https://github.com/stretchr/testify)
 [![Mocking](https://img.shields.io/badge/Mock-Mocking%20Library-blue)](https://go.uber.org/mock)
 
@@ -36,7 +36,7 @@ Using the principles of Robert Martin (aka Uncle Bob).
 [Go-clean-template](https://evrone.com/go-clean-template?utm_source=github&utm_campaign=go-clean-template) is created &
 supported by [Evrone](https://evrone.com/?utm_source=github&utm_campaign=go-clean-template).
 
-This template implements three types of servers:
+This template implements four types of servers:
 
 - AMQP RPC (based on RabbitMQ as [transport](https://github.com/rabbitmq/amqp091-go)
   and [Request-Reply pattern](https://www.enterpriseintegrationpatterns.com/patterns/messaging/RequestReply.html))
@@ -45,12 +45,66 @@ This template implements three types of servers:
 - gRPC ([gRPC](https://grpc.io/) framework based on protobuf)
 - REST API ([Fiber](https://github.com/gofiber/fiber) framework)
 
+The template includes three domains to demonstrate multi-service architecture:
+
+- **User Authentication** — registration, login, JWT-based authorization
+- **Task Management** — CRUD operations with status transitions (todo, in_progress, done)
+- **Translation** — text translation with history tracking
+
+All domains are available across all four transports (REST, gRPC, AMQP RPC, NATS RPC).
+
 ## Content
 
+- [Domains](#domains)
 - [Quick start](#quick-start)
+- [Observability](#observability)
 - [Project structure](#project-structure)
 - [Dependency Injection](#dependency-injection)
 - [Clean Architecture](#clean-architecture)
+
+## Domains
+
+The template includes three fully implemented domains, each available across all four transports (REST, gRPC, AMQP RPC, NATS RPC).
+
+### User Authentication
+
+Registration, login, and JWT-based authorization.
+
+| Operation   | REST                     | gRPC                     |
+|-------------|--------------------------|--------------------------|
+| Register    | `POST /v1/auth/register` | `AuthService/Register`   |
+| Login       | `POST /v1/auth/login`    | `AuthService/Login`      |
+| Get profile | `GET /v1/user/profile`   | `AuthService/GetProfile` |
+
+- Passwords hashed with bcrypt
+- JWT tokens with configurable expiry
+- Auth middleware on all transports
+
+### Task Management
+
+CRUD operations with a status state machine.
+
+| Operation  | REST                         | gRPC                         |
+|------------|------------------------------|------------------------------|
+| Create     | `POST /v1/tasks`             | `TaskService/CreateTask`     |
+| List       | `GET /v1/tasks`              | `TaskService/ListTasks`      |
+| Get        | `GET /v1/tasks/:id`          | `TaskService/GetTask`        |
+| Update     | `PUT /v1/tasks/:id`          | `TaskService/UpdateTask`     |
+| Transition | `PATCH /v1/tasks/:id/status` | `TaskService/TransitionTask` |
+| Delete     | `DELETE /v1/tasks/:id`       | `TaskService/DeleteTask`     |
+
+- Status transitions: `todo` → `in_progress` → `done` (and `in_progress` → `todo`)
+- Pagination with `limit`/`offset` and optional status filter
+- Tasks scoped to the authenticated user
+
+### Translation
+
+Text translation via external API with history tracking.
+
+| Operation | REST                                | gRPC                                    |
+|-----------|-------------------------------------|-----------------------------------------|
+| Translate | `POST /v1/translation/do-translate` | `TranslationHistoryService/DoTranslate` |
+| History   | `GET /v1/translation/history`       | `TranslationHistoryService/ShowHistory` |
 
 ## Quick start
 
@@ -91,6 +145,8 @@ Check services:
   - http://app.lvh.me/swagger | http://127.0.0.1:8080/swagger
 - gRPC:
   - URL: `tcp://grpc.lvh.me:8081` | `tcp://127.0.0.1:8081`
+  - [v1/auth.proto](docs/proto/v1/auth.proto)
+  - [v1/task.proto](docs/proto/v1/task.proto)
   - [v1/translation.history.proto](docs/proto/v1/translation.history.proto)
 - PostgreSQL:
   - `postgres://user:myAwEsOm3pa55@w0rd@127.0.0.1:5432/db`
@@ -100,6 +156,36 @@ Check services:
 - NATS monitoring:
   - http://nats.lvh.me | http://127.0.0.1:8222/
   - Credentials: `guest` / `guest`
+- Jaeger (traces UI):
+  - http://jaeger.lvh.me | http://127.0.0.1:16686
+
+## Observability
+
+Distributed tracing is provided by [OpenTelemetry](https://opentelemetry.io/). Spans are exported over OTLP/gRPC to a
+collector — [Jaeger](https://www.jaegertracing.io/) in the docker stack.
+
+- **Context propagation** — W3C `traceparent` + `baggage`, so a single trace spans all four transports. REST uses
+  the [otelfiber](https://github.com/gofiber/contrib/tree/main/otelfiber) middleware, gRPC uses the
+  [otelgrpc](https://github.com/open-telemetry/opentelemetry-go-contrib) stats handler, and AMQP RPC / NATS RPC carry the
+  trace context in message headers via custom carriers (`pkg/rabbitmq/rmq_rpc/otel_carrier.go`,
+  `pkg/nats/nats_rpc/otel_carrier.go`).
+- **Instrumented layers** — use cases and repositories are wrapped in tracing decorators (`*/tracing.go`), so a trace
+  shows the full path: controller → usecase → repo / webapi.
+- **No-op when disabled** — with `TRACING_ENABLED=false` a no-op tracer provider is installed, so instrumentation runs
+  unconditionally with zero overhead.
+- **Sampling** — `TRACING_SAMPLE_RATE` is a parent-based ratio. Use `1.0` locally; lower it (`0.1` / `0.01`) in
+  production.
+- Internal routes (`/healthz`, `/metrics`, `/swagger`) are excluded from tracing — only the versioned API groups are
+  instrumented.
+
+Configuration (see [.env.example](.env.example)):
+
+| Variable                | Default            | Description                       |
+|-------------------------|--------------------|-----------------------------------|
+| `TRACING_ENABLED`       | `false`            | Enable OpenTelemetry tracing      |
+| `TRACING_OTLP_ENDPOINT` | `localhost:4317`   | OTLP/gRPC collector endpoint      |
+| `TRACING_OTLP_INSECURE` | `true`             | Disable TLS for the OTLP exporter |
+| `TRACING_SAMPLE_RATE`   | `0.1`              | Parent-based sampling ratio       |
 
 ## Project structure
 
@@ -120,6 +206,17 @@ Config: [config.go](config/config.go)
 Example: [.env.example](.env.example)
 
 [docker-compose.yml](docker-compose.yml) uses `env` variables to configure services.
+
+HTTP always runs. The other transports and the HTTP guards are set here:
+
+| Variable                | Default | Description                                                  |
+|-------------------------|---------|--------------------------------------------------------------|
+| `GRPC_ENABLED`          | `true`  | Start the gRPC server                                        |
+| `RMQ_ENABLED`           | `true`  | Start the RabbitMQ RPC server (off: no RabbitMQ needed)      |
+| `NATS_ENABLED`          | `true`  | Start the NATS RPC server (off: no NATS needed)              |
+| `CORS_ALLOWED_ORIGINS`  | `*`     | Origins a browser may call the REST API from, comma-separated |
+| `RATE_LIMIT_MAX`        | `100`   | Requests per client in each window                           |
+| `RATE_LIMIT_EXPIRATION` | `1m`    | The rate limit's window                                      |
 
 ### `docs`
 
@@ -161,9 +258,10 @@ go run -tags migrate ./cmd/app
 
 ### `internal/controller`
 
-Server handler layer (MVC controllers). The template shows 3 servers:
+Server handler layer (MVC controllers). The template shows 4 servers:
 
 - AMQP RPC (based on RabbitMQ as transport)
+- NATS RPC (based on NATS as transport)
 - gRPC ([gRPC](https://grpc.io/) framework based on protobuf)
 - REST API ([Fiber](https://github.com/gofiber/fiber) framework)
 
@@ -183,7 +281,7 @@ And in the file `internal/controller/amqp_rpc/router.go` add the line:
 routes := make(map[string]server.CallHandler)
 
 {
-    v1.NewTranslationRoutes(routes, t, l)
+    v1.NewRoutes(routes, t, u, tk, j, l)
 }
 
 {
@@ -200,10 +298,14 @@ And in the file `internal/controller/grpc/router.go` add the line:
 
 ```go
 {
+    v1.NewAuthRoutes(app, u, l)
+    v1.NewTaskRoutes(app, tk, l)
     v1.NewTranslationRoutes(app, t, l)
 }
 
 {
+    v2.NewAuthRoutes(app, u, l)
+    v2.NewTaskRoutes(app, tk, l)
     v2.NewTranslationRoutes(app, t, l)
 }
 
@@ -220,7 +322,7 @@ And in the file `internal/controller/nats_rpc/router.go` add the line:
 routes := make(map[string]server.CallHandler)
 
 {
-    v1.NewTranslationRoutes(routes, t, l)
+    v1.NewRoutes(routes, t, u, tk, j, l)
 }
 
 {
@@ -237,11 +339,11 @@ And in the file `internal/controller/restapi/router.go` add the line:
 ```go
 apiV1Group := app.Group("/v1")
 {
-	v1.NewTranslationRoutes(apiV1Group, t, l)
+	v1.NewRoutes(apiV1Group, t, u, tk, jwtManager, l)
 }
 apiV2Group := app.Group("/v2")
 {
-	v2.NewTranslationRoutes(apiV2Group, t, l)
+	v2.NewRoutes(apiV2Group, t, u, tk, jwtManager, l)
 }
 ```
 
@@ -284,6 +386,12 @@ RabbitMQ RPC pattern:
 - Exchange fanout is used, to which 1 exclusive queue is bound, this is the most productive config
 - Reconnect on the loss of connection
 
+### `pkg/tracing`
+
+OpenTelemetry setup: configures a global `TracerProvider` with an OTLP/gRPC exporter and W3C trace-context + baggage
+propagators. When tracing is disabled, a no-op provider is installed so instrumentation code runs unconditionally.
+See [Observability](#observability).
+
 ## Dependency Injection
 
 In order to remove the dependence of business logic on external packages, dependency injection is used.
@@ -318,7 +426,7 @@ func (uc *UseCase) Do() {
 }
 ```
 
-It will also allow us to do auto-generation of mocks (for example with [mockery](https://github.com/vektra/mockery)) and
+It will also allow us to do auto-generation of mocks (for example with [go.uber.org/mock](https://go.uber.org/mock)) and
 easily write unit tests.
 
 > We are not tied to specific implementations in order to always be able to change one component to another.
@@ -404,9 +512,9 @@ Or more complex business logic:
 - **Use Cases** is business logic located in `internal/usecase`.
 
 The layer with which business logic directly interacts is usually called the _infrastructure_ layer.
-These can be repositories `internal/usecase/repo`, external webapi `internal/usecase/webapi`, any pkg, and other
+These can be repositories `internal/repo/persistent`, external webapi `internal/repo/webapi`, any pkg, and other
 microservices.
-In the template, the _infrastructure_ packages are located inside `internal/usecase`.
+In the template, the _infrastructure_ packages are located inside `internal/repo`.
 
 You can choose how to call the entry points as you wish. The options are:
 

@@ -1,66 +1,68 @@
-// Package v1 implements routing paths. Each services in own file.
 package restapi
 
 import (
 	"net/http"
 
-	"github.com/ansrivas/fiberprometheus/v2"
 	"github.com/evrone/go-clean-template/config"
 	_ "github.com/evrone/go-clean-template/docs" // Swagger docs.
 	"github.com/evrone/go-clean-template/internal/controller/restapi/middleware"
 	v1 "github.com/evrone/go-clean-template/internal/controller/restapi/v1"
 	"github.com/evrone/go-clean-template/internal/usecase"
+	"github.com/evrone/go-clean-template/pkg/jwt"
 	"github.com/evrone/go-clean-template/pkg/logger"
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/swagger"
+	otelfiber "github.com/gofiber/contrib/v3/otel"
+	fiberprometheus "github.com/gofiber/contrib/v3/prometheus"
+	swagger "github.com/gofiber/contrib/v3/swaggo"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/cors"
+	"github.com/gofiber/fiber/v3/middleware/helmet"
+	"github.com/gofiber/fiber/v3/middleware/limiter"
+	"github.com/gofiber/fiber/v3/middleware/requestid"
 )
 
 // NewRouter -.
 // Swagger spec:
-// @title       Go Clean Template API
-// @description Using a translation service as an example
-// @version     1.0
-// @host        localhost:8080
-// @BasePath    /v1
-func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, l logger.Interface) {
-	// Middleware — order matters: RequestID → Security → CORS → RateLimit → Logger → Recovery.
-	app.Use(middleware.RequestID())
-	app.Use(middleware.Security())
-	app.Use(middleware.CORS(middleware.CORSConfig{
-		AllowOrigins: cfg.CORS.AllowOrigins,
-		AllowMethods: "GET,POST,PUT,DELETE,PATCH,OPTIONS",
-		AllowHeaders: "Origin,Content-Type,Accept,Authorization,X-Request-ID",
-	}))
-	app.Use(middleware.RateLimit(middleware.RateLimitConfig{
-		Max:        cfg.RateLimit.Max,
-		Expiration: cfg.RateLimit.Expiration,
-	}))
+//
+//	@title       Go Clean Template API
+//	@description Multi-domain clean architecture template with translation, user, and task management
+//	@version     1.0
+//	@host        localhost:8080
+//	@BasePath    /v1
+//	@securityDefinitions.apikey BearerAuth
+//	@in header
+//	@name Authorization
+func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, u usecase.User, tk usecase.Task, jwtManager *jwt.Manager, l logger.Interface) {
+	// Options
+	app.Use(requestid.New())
 	app.Use(middleware.Logger(l))
 	app.Use(middleware.Recovery(l))
+	app.Use(helmet.New())
+	app.Use(cors.New(cors.Config{AllowOrigins: cfg.CORS.AllowOrigins}))
+	app.Use(limiter.New(limiter.Config{Max: cfg.Limit.Max, Expiration: cfg.Limit.Expiration}))
 
-	// OpenTelemetry tracing (conditional).
-	if cfg.Tracer.Enabled {
-		app.Use(middleware.Tracing(cfg.Tracer.ServiceName, l))
-	}
-
-	// Prometheus metrics.
+	// Prometheus metrics
 	if cfg.Metrics.Enabled {
-		prometheus := fiberprometheus.New(cfg.App.Name)
-		prometheus.RegisterAt(app, "/metrics")
-		app.Use(prometheus.Middleware)
+		app.Use(fiberprometheus.New(fiberprometheus.Config{
+			ServiceName: cfg.App.Name,
+			MetricsPath: "/metrics",
+		}))
 	}
 
-	// Swagger.
+	// Swagger
 	if cfg.Swagger.Enabled {
 		app.Get("/swagger/*", swagger.HandlerDefault)
 	}
 
-	// K8s probe.
-	app.Get("/healthz", func(ctx *fiber.Ctx) error { return ctx.SendStatus(http.StatusOK) })
+	// K8s probe
+	app.Get("/healthz", func(ctx fiber.Ctx) error { return ctx.SendStatus(http.StatusOK) })
 
-	// Routers.
+	// Routers
 	apiV1Group := app.Group("/v1")
 	{
-		v1.NewTranslationRoutes(apiV1Group, t, l)
+		if cfg.Tracing.Enabled {
+			apiV1Group.Use(otelfiber.New())
+		}
+
+		v1.NewRoutes(apiV1Group, t, u, tk, jwtManager, l)
 	}
 }

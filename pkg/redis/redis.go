@@ -86,7 +86,7 @@ func (r *Redis) Close() error {
 }
 
 // Set stores a key-value pair with expiration.
-func (r *Redis) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+func (r *Redis) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
 	return r.Client.Set(ctx, key, value, expiration).Err() //nolint:wrapcheck // passthrough
 }
 
