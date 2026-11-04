@@ -23,6 +23,7 @@ type (
 		Tracing tracing
 		CORS    cors
 		Limit   limit
+		API     api
 	}
 
 	// App -.
@@ -96,6 +97,16 @@ type (
 	// CORS -. The origins a browser may call the API from, comma-separated.
 	cors struct {
 		AllowOrigins []string `env:"CORS_ALLOWED_ORIGINS" envDefault:"*" envSeparator:","`
+	}
+
+	// API -. The client's contract (api/openapi.json) under Prefix, on the
+	// session cookie: an access cookie of SessionLength and a refresh cookie
+	// of RefreshLength. Secure is off only for plain HTTP in a test stack.
+	api struct {
+		Prefix        string        `env:"API_PREFIX"             envDefault:"/api"`
+		CookieSecure  bool          `env:"SESSION_COOKIE_SECURE"  envDefault:"true"`
+		SessionLength time.Duration `env:"SESSION_LENGTH"         envDefault:"8h"`
+		RefreshLength time.Duration `env:"SESSION_REFRESH_LENGTH" envDefault:"168h"`
 	}
 
 	// Limit -. Requests per client in each window, kept in memory.

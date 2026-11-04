@@ -20,7 +20,7 @@ func TestInitServers_ATransportThatIsOffIsNeverStarted(t *testing.T) {
 	cfg.RMQ.URL = "amqp://nobody@127.0.0.1:1/"
 	cfg.NATS.URL = "nats://127.0.0.1:1"
 
-	s := initServers(cfg, useCases{}, jwt.New("test-secret", time.Hour), logger.New("error"))
+	s := initServers(cfg, &useCases{}, jwt.New("test-secret", time.Hour), logger.New("error"))
 
 	assert.NotNil(t, s.http)
 	assert.Nil(t, s.grpc)
@@ -37,7 +37,7 @@ func TestInitServers_GRPCIsBuiltWhenOn(t *testing.T) {
 	cfg.GRPC.Enabled = true
 	cfg.GRPC.Port = "0"
 
-	s := initServers(cfg, useCases{}, jwt.New("test-secret", time.Hour), logger.New("error"))
+	s := initServers(cfg, &useCases{}, jwt.New("test-secret", time.Hour), logger.New("error"))
 
 	assert.NotNil(t, s.grpc)
 	assert.NotNil(t, notify(s.grpc, true))

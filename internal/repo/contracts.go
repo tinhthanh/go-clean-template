@@ -3,6 +3,7 @@ package repo
 
 import (
 	"context"
+	"time"
 
 	"github.com/evrone/go-clean-template/internal/entity"
 )
@@ -35,6 +36,30 @@ type (
 		List(ctx context.Context, userID string, filter TaskFilter) ([]entity.Task, int, error)
 		Update(ctx context.Context, task *entity.Task) error
 		Delete(ctx context.Context, userID, taskID string) error
+	}
+
+	// PrincipalRepo reads who a person is: their group's grants and their workspaces.
+	PrincipalRepo interface {
+		ByID(ctx context.Context, userID string) (entity.Principal, error)
+		// ByEmail answers the person and their password's hash, for signing in.
+		ByEmail(ctx context.Context, email string) (entity.Principal, string, error)
+	}
+
+	// AuditRepo adds lines to the log, which nothing changes or removes.
+	AuditRepo interface {
+		Write(ctx context.Context, line *entity.AuditLine) error
+		// WriteOnce writes the line unless the same actor's same line on the
+		// same target was written within the window; it answers whether it wrote.
+		WriteOnce(ctx context.Context, line *entity.AuditLine, within time.Duration) (bool, error)
+	}
+
+	// PatientRepo -.
+	PatientRepo interface {
+		List(ctx context.Context, q *entity.PatientQuery) (entity.PatientPage, error)
+		Get(ctx context.Context, id string) (entity.Patient, error)
+		// Store issues the patient's code and id.
+		Store(ctx context.Context, p *entity.Patient) error
+		Update(ctx context.Context, p *entity.Patient) error
 	}
 
 	// TaskFilter -.

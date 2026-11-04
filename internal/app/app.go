@@ -8,20 +8,29 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/evrone/go-clean-template/api"
 	"github.com/evrone/go-clean-template/config"
 	amqprpc "github.com/evrone/go-clean-template/internal/controller/amqp_rpc"
 	"github.com/evrone/go-clean-template/internal/controller/grpc"
 	grpcmw "github.com/evrone/go-clean-template/internal/controller/grpc/middleware"
 	natsrpc "github.com/evrone/go-clean-template/internal/controller/nats_rpc"
 	"github.com/evrone/go-clean-template/internal/controller/restapi"
+	"github.com/evrone/go-clean-template/internal/controller/restapi/clientapi"
+	persistAuditRepo "github.com/evrone/go-clean-template/internal/repo/persistent/audit"
+	persistPatientRepo "github.com/evrone/go-clean-template/internal/repo/persistent/patient"
+	persistPrincipalRepo "github.com/evrone/go-clean-template/internal/repo/persistent/principal"
 	persistTaskRepo "github.com/evrone/go-clean-template/internal/repo/persistent/task"
 	persistTranslationRepo "github.com/evrone/go-clean-template/internal/repo/persistent/translation"
 	persistUserRepo "github.com/evrone/go-clean-template/internal/repo/persistent/user"
 	"github.com/evrone/go-clean-template/internal/repo/webapi"
 	"github.com/evrone/go-clean-template/internal/usecase"
+	"github.com/evrone/go-clean-template/internal/usecase/audit"
+	"github.com/evrone/go-clean-template/internal/usecase/patient"
+	"github.com/evrone/go-clean-template/internal/usecase/session"
 	"github.com/evrone/go-clean-template/internal/usecase/task"
 	"github.com/evrone/go-clean-template/internal/usecase/translation"
 	"github.com/evrone/go-clean-template/internal/usecase/user"
+	"github.com/evrone/go-clean-template/pkg/contract"
 	"github.com/evrone/go-clean-template/pkg/grpcserver"
 	"github.com/evrone/go-clean-template/pkg/httpserver"
 	"github.com/evrone/go-clean-template/pkg/jwt"
@@ -38,6 +47,9 @@ type useCases struct {
 	translation usecase.Translation
 	user        usecase.User
 	task        usecase.Task
+	session     usecase.Session
+	audit       usecase.Audit
+	patient     usecase.Patient
 }
 
 type servers struct {
@@ -56,13 +68,16 @@ func initUseCases(pg *postgres.Postgres, jwtManager *jwt.Manager) useCases {
 		user:        user.New(userRepo, jwtManager),
 		task:        task.New(taskRepo),
 		translation: translation.New(translationRepo, webapi.New()),
+		session:     session.New(persistPrincipalRepo.New(pg)),
+		audit:       audit.New(persistAuditRepo.New(pg)),
+		patient:     patient.New(persistPatientRepo.New(pg)),
 	}
 }
 
 // initServers starts the HTTP server always, and gRPC, RabbitMQ RPC and NATS
 // RPC only when their *_ENABLED says so: a disabled one stays nil, and needs
 // no broker running.
-func initServers(cfg *config.Config, uc useCases, jwtManager *jwt.Manager, l logger.Interface) servers {
+func initServers(cfg *config.Config, uc *useCases, jwtManager *jwt.Manager, l logger.Interface) servers {
 	var s servers
 
 	if cfg.RMQ.Enabled {
@@ -102,7 +117,35 @@ func initServers(cfg *config.Config, uc useCases, jwtManager *jwt.Manager, l log
 	s.http = httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
 	restapi.NewRouter(s.http.App, cfg, uc.translation, uc.user, uc.task, jwtManager, l)
 
+	if _, err := clientapi.NewRoutes(s.http.App.Group(cfg.API.Prefix), clientDeps(cfg, uc, l)); err != nil {
+		l.Fatal(fmt.Errorf("app - Run - clientapi.NewRoutes: %w", err))
+	}
+
 	return s
+}
+
+// clientDeps is the client's contract (api/openapi.json) and what serves
+// it. The session and refresh cookies are signed with secrets of their own,
+// derived from JWT_SECRET, so neither passes for the other or for /v1's token.
+func clientDeps(cfg *config.Config, uc *useCases, l logger.Interface) *clientapi.Deps {
+	spec, err := contract.Load(api.Spec())
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - contract.Load: %w", err))
+	}
+
+	return &clientapi.Deps{
+		Contract: spec,
+		Session:  uc.session,
+		Audit:    uc.audit,
+		Patient:  uc.patient,
+		Access:   jwt.New(cfg.JWT.Secret+":session", cfg.API.SessionLength),
+		Refresh:  jwt.New(cfg.JWT.Secret+":refresh", cfg.API.RefreshLength),
+		Cookies: clientapi.Cookies{
+			Prefix: cfg.API.Prefix, Secure: cfg.API.CookieSecure,
+			SessionLength: cfg.API.SessionLength, RefreshLength: cfg.API.RefreshLength,
+		},
+		Logger: l,
+	}
 }
 
 func (s *servers) startServers() {
@@ -211,7 +254,7 @@ func Run(cfg *config.Config) {
 	jwtManager := jwt.New(cfg.JWT.Secret, cfg.JWT.TokenExpiry)
 
 	uc := initUseCases(pg, jwtManager)
-	s := initServers(cfg, uc, jwtManager, l)
+	s := initServers(cfg, &uc, jwtManager, l)
 	s.startServers()
 	s.waitForShutdown(l)
 }

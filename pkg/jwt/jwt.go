@@ -60,3 +60,26 @@ func (m *Manager) ParseToken(tokenString string) (string, error) {
 
 	return sub, nil
 }
+
+// ParseExpiry is ParseToken, and when the token ends.
+func (m *Manager) ParseExpiry(tokenString string) (string, time.Time, error) {
+	claims := &jwtlib.RegisteredClaims{}
+
+	_, err := jwtlib.ParseWithClaims(tokenString, claims, func(token *jwtlib.Token) (any, error) {
+		if _, ok := token.Method.(*jwtlib.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("%w: %v", ErrUnexpectedSigningMethod, token.Header["alg"])
+		}
+
+		return []byte(m.secret), nil
+	})
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("jwt - ParseExpiry - jwtlib.ParseWithClaims: %w", err)
+	}
+
+	var ends time.Time
+	if claims.ExpiresAt != nil {
+		ends = claims.ExpiresAt.Time
+	}
+
+	return claims.Subject, ends, nil
+}
