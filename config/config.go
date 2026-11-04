@@ -23,6 +23,7 @@ type (
 		Tracing tracing
 		CORS    cors
 		Limit   limit
+		API     api
 	}
 
 	// App -.
@@ -50,13 +51,13 @@ type (
 
 	// GRPC -.
 	grpc struct {
-		Enabled bool   `env:"GRPC_ENABLED" envDefault:"true"`
+		Enabled bool   `env:"GRPC_ENABLED" envDefault:"false"`
 		Port    string `env:"GRPC_PORT,required"`
 	}
 
 	// RMQ -.
 	rmq struct {
-		Enabled        bool   `env:"RMQ_ENABLED" envDefault:"true"`
+		Enabled        bool   `env:"RMQ_ENABLED" envDefault:"false"`
 		ServerExchange string `env:"RMQ_RPC_SERVER,required"`
 		ClientExchange string `env:"RMQ_RPC_CLIENT,required"`
 		URL            string `env:"RMQ_URL,required"`
@@ -64,7 +65,7 @@ type (
 
 	// NATS -.
 	nats struct {
-		Enabled        bool   `env:"NATS_ENABLED" envDefault:"true"`
+		Enabled        bool   `env:"NATS_ENABLED" envDefault:"false"`
 		ServerExchange string `env:"NATS_RPC_SERVER,required"`
 		URL            string `env:"NATS_URL,required"`
 	}
@@ -96,6 +97,16 @@ type (
 	// CORS -. The origins a browser may call the API from, comma-separated.
 	cors struct {
 		AllowOrigins []string `env:"CORS_ALLOWED_ORIGINS" envDefault:"*" envSeparator:","`
+	}
+
+	// API -. The client's contract (api/openapi.json) under Prefix, on the
+	// session cookie: an access cookie of SessionLength and a refresh cookie
+	// of RefreshLength. Secure is off only for plain HTTP in a test stack.
+	api struct {
+		Prefix        string        `env:"API_PREFIX"             envDefault:"/api"`
+		CookieSecure  bool          `env:"SESSION_COOKIE_SECURE"  envDefault:"true"`
+		SessionLength time.Duration `env:"SESSION_LENGTH"         envDefault:"8h"`
+		RefreshLength time.Duration `env:"SESSION_REFRESH_LENGTH" envDefault:"168h"`
 	}
 
 	// Limit -. Requests per client in each window, kept in memory.

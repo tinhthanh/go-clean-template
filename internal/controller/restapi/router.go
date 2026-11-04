@@ -2,6 +2,7 @@ package restapi
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/evrone/go-clean-template/config"
 	_ "github.com/evrone/go-clean-template/docs" // Swagger docs.
@@ -37,7 +38,12 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, u usec
 	app.Use(middleware.Logger(l))
 	app.Use(middleware.Recovery(l))
 	app.Use(helmet.New())
-	app.Use(cors.New(cors.Config{AllowOrigins: cfg.CORS.AllowOrigins}))
+	// A named origin may send the session cookie; "*" never can (the browser refuses it).
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     cfg.CORS.AllowOrigins,
+		AllowCredentials: len(cfg.CORS.AllowOrigins) > 0 && !slices.Contains(cfg.CORS.AllowOrigins, "*"),
+		AllowHeaders:     []string{"Content-Type", "Authorization", "X-Requested-With", "X-Branch"},
+	}))
 	app.Use(limiter.New(limiter.Config{Max: cfg.Limit.Max, Expiration: cfg.Limit.Expiration}))
 
 	// Prometheus metrics

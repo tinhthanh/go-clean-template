@@ -3,6 +3,7 @@ package usecase
 
 import (
 	"context"
+	"time"
 
 	"github.com/evrone/go-clean-template/internal/entity"
 )
@@ -31,5 +32,27 @@ type (
 		Update(ctx context.Context, userID, taskID, title, description string) (entity.Task, error)
 		Transition(ctx context.Context, userID, taskID string, newStatus entity.TaskStatus) (entity.Task, error)
 		Delete(ctx context.Context, userID, taskID string) error
+	}
+
+	// Session is who is signed in, for the client's session cookie.
+	Session interface {
+		SignIn(ctx context.Context, email, password string) (entity.Principal, error)
+		Principal(ctx context.Context, userID string) (entity.Principal, error)
+	}
+
+	// Audit writes the log's lines.
+	Audit interface {
+		Write(ctx context.Context, line *entity.AuditLine) error
+		// WriteOnce writes the line at most once in the window per actor and target.
+		WriteOnce(ctx context.Context, line *entity.AuditLine, within time.Duration) error
+	}
+
+	// Patient is a clinic's patients, as the person reading may see them.
+	Patient interface {
+		List(ctx context.Context, p *entity.Principal, q *entity.PatientQuery) (entity.PatientPage, error)
+		Get(ctx context.Context, p *entity.Principal, id string) (entity.Patient, error)
+		Create(ctx context.Context, p *entity.Principal, in *entity.Patient) (entity.Patient, error)
+		// Update answers the patient as changed, and each field's old and new value.
+		Update(ctx context.Context, p *entity.Principal, id string, patch *entity.PatientPatch) (entity.Patient, []entity.Change, error)
 	}
 )

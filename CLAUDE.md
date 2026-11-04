@@ -1,7 +1,10 @@
 # go-clean-template
 
 Go clean-architecture reference service. Three domains (`user`, `task`, `translation`) exposed
-over four transports (REST/Fiber, gRPC, RabbitMQ RPC, NATS RPC) from one shared use-case layer.
+over four transports (REST/Fiber, gRPC, RabbitMQ RPC, NATS RPC) from one shared use-case layer,
+and the backend of a browser client: its contract, `api/openapi.json`, served under `/api` by
+`internal/controller/restapi/clientapi` (see "The client's contract" below). Only HTTP starts by
+default; `GRPC_ENABLED`, `RMQ_ENABLED`, `NATS_ENABLED` turn the others on.
 Module path: `github.com/evrone/go-clean-template`. The Go version is declared in `go.mod`.
 
 ## Commands — drive everything through the Makefile
@@ -28,7 +31,9 @@ different settings than CI. Use the target, not the tool.
 | Run the app locally | `make run` | `go run ./cmd/app` — the target regenerates docs and builds with `-tags migrate` |
 | Create a migration | `make migrate-create <name>` | `migrate create ...` |
 | Apply migrations | `make migrate-up` | `migrate -path ... up` |
-| Full check before pushing | `make pre-commit` | running the steps by hand |
+| Everything CI runs, before a push | `make verify` | `make pre-commit`, which skips the integration suite |
+| Copy in the client's contract | `make contract-sync FROM=<client repo>` | editing `api/openapi.json` |
+| What of the contract is built | `make contract-status` (`go run ./cmd/contract -all` for every operation) | grepping routes |
 
 `make help` lists every target.
 
@@ -43,7 +48,9 @@ Three traps in these targets:
 - **`make run` and `make pre-commit` depend on `swag-v1` and `proto-v1`**, so they need `swag` and
   `protoc` on `PATH`. Run `make bin-deps` first (`protoc` itself is not installed by it).
 
-Never claim a change is done without `make format`, `make linter-golangci` and `make test` passing.
+Never claim a change is done without `make format`, `make linter-golangci` and `make test` passing,
+and never push without `make verify` (Docker running): it is CI's unit and integration jobs, here,
+on an empty database each run.
 
 ## Dependency rule
 
@@ -120,6 +127,47 @@ AMQP and NATS handlers are closures returning that transport's `server.CallHandl
 has its own `extractUserID` in `v1/auth.go` taking its own message type. Handlers return a plain
 wrapped `error`; the RPC server turns it into a generic `ErrInternalServer` / `ErrBadHandler`
 reply. Do not hand-build an error envelope there.
+
+## The client's contract (`api/openapi.json`)
+
+The browser client owns this file (its own `api/openapi.json`, which its tests hold its client and
+mock to); `make contract-sync FROM=<client repo>` copies it in, and nothing edits it here. It is
+embedded (`api/api.go`), read by `pkg/contract`, and every operation in it gets a route under
+`API_PREFIX` (`/api`). One with no handler answers 501 `unavailable`, so the client sees what isn't
+built rather than a 404; `make contract-status` counts them.
+
+Beside each operation the contract writes its rules, and **the guard applies them, so a handler
+never does** (`clientapi/guard.go`, in this order):
+
+1. a write carries `X-Requested-With: XMLHttpRequest`, or 403 (CSRF: the session is a cookie);
+2. the `session` cookie names the caller (`refresh` for `refreshSession`), or 401 `unauthorized`;
+3. `x-permission`: `public`, `signed-in`, or any one of the listed action keys in the caller's
+   group grants (`entity.Principal.CanAny`), or 403 `forbidden`;
+4. `x-branch-scoped` (anything but `false`): a `workspace` asked must be one of the caller's, and
+   `all` needs `set.branch.all`, or 403 `not_member`; `X-Branch`, when it is theirs, is where the
+   log's lines go;
+5. the request body against the operation's schema, or 400 `invalid` with `field`;
+6. after a 2xx: `x-masks` on the answer (`pkg/contract.Mask`: `masked`, `absent`, `equals`; a
+   masked field's object gets `<field>Masked: true` where its schema has one);
+7. `x-audit` lines into `audit_log`, which the database refuses to change or empty. A line read as
+   `<action> <resource>[: rule]`; `per N minutes` is written once in that window per person and
+   record; `for one who …` depends on the handler, which writes it. A line that can't be written
+   turns the answer into a 500: nothing is shown that wasn't logged.
+
+What the guard can't know is the use case's: a record of another branch (`"hidden"` is a 404,
+`"filter"` and `"clinical"` narrow the rows: `entity.Principal.Works`), which digits a masked reader
+may search by (the last three), who may change a phone. A handler decodes, calls the use case,
+encodes the contract's shape (`clientapi/patient.go`), and leaves `c.Locals(_localChanges, …)` for
+an update's old and new values. Refusals are `entity.ErrUnauthorized`, `ErrForbidden`,
+`ErrNotMember`, `ErrNotFound`, `entity.Invalid(field, words)`; `clientapi/refusal.go` maps them onto
+the contract's `Error` (`{error, code, field}`): words for people, never the raw error.
+
+A list is a `Page`: `items`, `next` (an opaque cursor, absent on the last page), `total` and a
+`summary` worked out over every match by the server, never summed from the page. A day is the
+clinic's (`Asia/Ho_Chi_Minh`), whatever the server's zone. Fixtures and seeds are synthetic (acme).
+
+Building an operation: `.claude/skills/add-operation/SKILL.md`, step by step; `patients`
+(`patList`, `patGet`, `patCreate`, `patUpdate`) is the worked example.
 
 ## Conventions that will bite you
 
@@ -256,4 +304,10 @@ there is no ORM and no raw string concatenation.
   generated gomock mocks, are table-driven, and call `t.Parallel()` (`paralleltest` enforces it).
 - Integration: `integration-test/` runs *inside* the docker network — it resolves the service as
   host `app` and talks to `rabbitmq` / `nats` by container name, so it fails on the host machine.
-  Always run it through `make compose-up-integration-test`.
+  Always run it through `make compose-up-integration-test`, which removes its volumes after, so
+  every run starts on an empty database (the suite registers fixed names, and a second run on the
+  same data fails with 409s).
+- The client API: `clientapi/clientapi_test.go` drives the guard over the real contract with fake
+  use cases, holding every answer and refusal to the contract's own schemas
+  (`contract.ValidateJSON`); `integration-test/client_test.go` does it over Postgres, seeding
+  branches, groups and people straight into the database (`PG_URL`).

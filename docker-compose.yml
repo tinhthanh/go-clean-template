@@ -44,6 +44,12 @@ x-backend-app-environment: &x-backend-app-environment
   # JWT
   JWT_SECRET: "your-secret-key-change-in-production"
   JWT_TOKEN_EXPIRY: "24h"
+  # Transports besides HTTP: this stack runs them all
+  GRPC_ENABLED: "true"
+  RMQ_ENABLED: "true"
+  NATS_ENABLED: "true"
+  # The client's API: plain HTTP inside this stack, so the cookie can't be Secure
+  SESSION_COOKIE_SECURE: "false"
 
 
 services:

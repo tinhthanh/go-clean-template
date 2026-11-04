@@ -8,6 +8,9 @@ services:
       dockerfile: integration-test/Dockerfile
     depends_on:
       - app
+    environment:
+      # The client API's tests seed people and branches straight into the database.
+      PG_URL: "postgres://user:myAwEsOm3pa55%40w0rd@db:5432/db"
     networks:
       app_network:
         aliases:

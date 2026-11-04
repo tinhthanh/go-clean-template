@@ -56,3 +56,20 @@ func TestJWT_ParseToken_Expired(t *testing.T) {
 	_, err = j.ParseToken(token)
 	require.Error(t, err)
 }
+
+func TestJWT_ParseExpiry_SaysWhenTheTokenEnds(t *testing.T) {
+	t.Parallel()
+
+	j := jwt.New("test-secret", time.Hour)
+
+	token, err := j.GenerateToken("user-123")
+	require.NoError(t, err)
+
+	userID, ends, err := j.ParseExpiry(token)
+	require.NoError(t, err)
+	assert.Equal(t, "user-123", userID)
+	assert.WithinDuration(t, time.Now().Add(time.Hour), ends, time.Minute)
+
+	_, _, err = jwt.New("other-secret", time.Hour).ParseExpiry(token)
+	require.Error(t, err, "another secret's token is refused")
+}

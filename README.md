@@ -50,8 +50,9 @@ The template includes three domains to demonstrate multi-service architecture:
 - **User Authentication** — registration, login, JWT-based authorization
 - **Task Management** — CRUD operations with status transitions (todo, in_progress, done)
 - **Translation** — text translation with history tracking
+- **Client API** — a browser client's own contract (`api/openapi.json`) served under `/api`, REST only: a session cookie, and the permissions, branches, masks and audit the contract writes beside each operation; patients are built, the rest answer 501
 
-All domains are available across all four transports (REST, gRPC, AMQP RPC, NATS RPC).
+The three domains are available across all four transports (REST, gRPC, AMQP RPC, NATS RPC); the client API is REST only. Only HTTP starts by default: `GRPC_ENABLED`, `RMQ_ENABLED` and `NATS_ENABLED` turn the others on.
 
 ## Content
 
@@ -105,6 +106,29 @@ Text translation via external API with history tracking.
 |-----------|-------------------------------------|-----------------------------------------|
 | Translate | `POST /v1/translation/do-translate` | `TranslationHistoryService/DoTranslate` |
 | History   | `GET /v1/translation/history`       | `TranslationHistoryService/ShowHistory` |
+
+### Client API
+
+The backend of a browser client whose contract is `api/openapi.json` (copied from the client with
+`make contract-sync FROM=<client repo>`). Every operation in it is routed under `/api`; one not built
+yet answers `501` with code `unavailable` (`make contract-status` counts them). Each answer is checked
+by the rules the contract writes beside the operation: `x-permission` (the caller's group grants),
+`x-branch-scoped`, `x-masks` and `x-audit`.
+
+| Operation      | REST                         | Rule                                                        |
+|----------------|------------------------------|-------------------------------------------------------------|
+| Sign in        | `POST /api/session`          | sets the `session` and `refresh` cookies (httpOnly, Secure, SameSite=Lax) |
+| Who is signed in | `GET /api/session`         | `signed-in`                                                 |
+| Longer session | `POST /api/session/refresh`  | the `refresh` cookie                                        |
+| Sign out       | `DELETE /api/session`        | `signed-in`                                                 |
+| List patients  | `GET /api/patients`          | `pat.patient.view`; a page with `next`, `total`, `summary`  |
+| Get a patient  | `GET /api/patients/:id`      | `pat.patient.view`; phone masked without `patient.phone.view_full`; one log line per person per patient per 10 minutes |
+| Make a patient | `POST /api/patients`         | `pat.patient.create`, at one of the caller's branches       |
+| Change a patient | `PATCH /api/patients/:id`  | `pat.patient.edit`; the log keeps each field's old and new value |
+
+- Every write carries `X-Requested-With: XMLHttpRequest` (CSRF); `X-Branch` names the branch the log's lines go to
+- Refusals are the contract's `Error`: `{error, code, field}` with `unauthorized`, `forbidden`, `not_member`, `not_found`, `invalid`, `unavailable`
+- The log (`audit_log`) is append-only: the database refuses an `UPDATE`, `DELETE` or `TRUNCATE`
 
 ## Quick start
 
@@ -211,12 +235,16 @@ HTTP always runs. The other transports and the HTTP guards are set here:
 
 | Variable                | Default | Description                                                  |
 |-------------------------|---------|--------------------------------------------------------------|
-| `GRPC_ENABLED`          | `true`  | Start the gRPC server                                        |
-| `RMQ_ENABLED`           | `true`  | Start the RabbitMQ RPC server (off: no RabbitMQ needed)      |
-| `NATS_ENABLED`          | `true`  | Start the NATS RPC server (off: no NATS needed)              |
+| `GRPC_ENABLED`          | `false` | Start the gRPC server                                        |
+| `RMQ_ENABLED`           | `false` | Start the RabbitMQ RPC server (off: no RabbitMQ needed)      |
+| `NATS_ENABLED`          | `false` | Start the NATS RPC server (off: no NATS needed)              |
 | `CORS_ALLOWED_ORIGINS`  | `*`     | Origins a browser may call the REST API from, comma-separated |
 | `RATE_LIMIT_MAX`        | `100`   | Requests per client in each window                           |
 | `RATE_LIMIT_EXPIRATION` | `1m`    | The rate limit's window                                      |
+| `API_PREFIX`            | `/api`  | Where the client API is mounted                              |
+| `SESSION_COOKIE_SECURE` | `true`  | Send the session cookies over HTTPS only (off only in a plain-HTTP test stack) |
+| `SESSION_LENGTH`        | `8h`    | How long a session cookie lasts                              |
+| `SESSION_REFRESH_LENGTH`| `168h`  | How long a refresh cookie lasts                              |
 
 ### `docs`
 
